@@ -13,17 +13,39 @@ const AboutScreen: React.FC = () => {
     <ScrollView style={styles.container}>
       <SectionHeader title="About" />
       <Text style={styles.text}>
-        Hi, I&apos;m {profile.name}, a {profile.role}. I enjoy building clean,
-        scalable apps and learning new tools to ship value quickly.
+        I&apos;m {profile.name}, a {profile.role} based in {profile.location}. I
+        enjoy building AI-powered systems, scalable backends, and polished
+        frontends. My work spans chatbot development, full-stack web apps, and
+        productivity tools that automate real business workflows.
       </Text>
 
-      <SectionHeader title="Skills" subtitle="Grouped by category" />
+      <SectionHeader title="Technical Skills" subtitle="Grouped by category" />
       {skills.map((cat) => (
         <View key={cat.id} style={styles.skillCategory}>
           <Text style={styles.skillCategoryTitle}>{cat.name}</Text>
           <View style={styles.skillRow}>
             {cat.skills.map((s) => (
               <SkillTag key={s} label={s} style={styles.skillTag} />
+            ))}
+          </View>
+        </View>
+      ))}
+
+      <SectionHeader title="Experience" />
+      {experience.map((ex) => (
+        <View key={ex.id} style={styles.timelineItem}>
+          <View style={styles.timelineDot} />
+          <View style={styles.timelineContent}>
+            <Text style={styles.timelineTitle}>
+              {ex.role} · {ex.company}
+            </Text>
+            <Text style={styles.timelineSubtitle}>
+              {ex.location} · {ex.period}
+            </Text>
+            {ex.details.map((d, idx) => (
+              <Text key={idx} style={styles.text}>
+                • {d}
+              </Text>
             ))}
           </View>
         </View>
@@ -37,22 +59,22 @@ const AboutScreen: React.FC = () => {
             <Text style={styles.timelineTitle}>{e.title}</Text>
             <Text style={styles.timelineSubtitle}>{e.institution}</Text>
             <Text style={styles.timelinePeriod}>{e.period}</Text>
+            {e.score && <Text style={styles.text}>{e.score}</Text>}
           </View>
         </View>
       ))}
 
-      <SectionHeader title="Experience" />
-      {experience.map((ex) => (
-        <View key={ex.id} style={styles.timelineItem}>
-          <View style={styles.timelineDot} />
-          <View style={styles.timelineContent}>
-            <Text style={styles.timelineTitle}>{ex.role}</Text>
-            <Text style={styles.timelineSubtitle}>{ex.company}</Text>
-            <Text style={styles.timelinePeriod}>{ex.period}</Text>
-            <Text style={styles.text}>{ex.details}</Text>
-          </View>
-        </View>
-      ))}
+      <SectionHeader title="Certifications" />
+      <Text style={styles.text}>
+        • C# Basics for Beginners: Learn C# Fundamentals by Coding — Udemy
+      </Text>
+      <Text style={styles.text}>
+        • Java 8+ Essential Training: Objects and APIs — LinkedIn Learning
+      </Text>
+      <Text style={styles.text}>
+        • Oracle Fusion Cloud Applications HCM Certified Foundations Associate —
+        Oracle University
+      </Text>
     </ScrollView>
   );
 };
@@ -67,7 +89,8 @@ const styles = StyleSheet.create({
   },
   text: {
     color: theme.colors.textSecondary,
-    marginBottom: theme.spacing(2)
+    marginBottom: theme.spacing(1),
+    fontSize: theme.fontSize.sm
   },
   skillCategory: {
     marginBottom: theme.spacing(2)

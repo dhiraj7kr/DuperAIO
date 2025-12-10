@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { Project } from '../data/defaultData';
 import { theme } from '../theme/theme';
@@ -35,6 +35,8 @@ const ProjectCard: React.FC<Props> = ({ project, onPress }) => (
   </TouchableOpacity>
 );
 
+export default ProjectCard;
+
 const styles = StyleSheet.create({
   card: {
     backgroundColor: theme.colors.card,
@@ -42,7 +44,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: theme.spacing(2),
     borderWidth: 1,
-    borderColor: theme.colors.border
+    borderColor: theme.colors.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1
   },
   image: {
     width: '100%',
@@ -72,10 +79,8 @@ const styles = StyleSheet.create({
   },
   detailsLink: {
     marginTop: theme.spacing(1),
-    color: theme.colors.accent,
+    color: theme.colors.primaryDark,
     fontSize: theme.fontSize.sm,
     fontWeight: '500'
   }
 });
-
-export default ProjectCard;

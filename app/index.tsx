@@ -38,8 +38,9 @@ const HomeScreen: React.FC = () => {
 
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.headerRow}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {/* top card with photo & info */}
+      <View style={styles.profileCard}>
+        <View style={styles.profileRow}>
           <TouchableOpacity onPress={pickProfileImage}>
             {profile.avatarUri ? (
               <Image source={{ uri: profile.avatarUri }} style={styles.avatar} />
@@ -55,17 +56,20 @@ const HomeScreen: React.FC = () => {
               </View>
             )}
           </TouchableOpacity>
-          <View style={{ marginLeft: theme.spacing(2) }}>
+          <View style={{ marginLeft: theme.spacing(2), flex: 1 }}>
             <Text style={styles.name}>{profile.name}</Text>
             <Text style={styles.role}>{profile.role}</Text>
+            <Text style={styles.location}>{profile.location}</Text>
+            <Text style={styles.contactLine}>
+              {profile.phone} · {profile.email}
+            </Text>
           </View>
+          <TouchableOpacity onPress={() => setEditVisible(true)}>
+            <Text style={styles.editText}>Edit</Text>
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity onPress={() => setEditVisible(true)}>
-          <Text style={styles.editText}>Edit</Text>
-        </TouchableOpacity>
+        <Text style={styles.tagline}>{profile.tagline}</Text>
       </View>
-
-      <Text style={styles.tagline}>{profile.tagline}</Text>
 
       <SectionHeader
         title="Featured Project"
@@ -75,8 +79,8 @@ const HomeScreen: React.FC = () => {
         <ProjectCard
           project={featured}
           onPress={() => {
-            // Real navigation via Projects tab
-            alert('Open this project from the Projects tab to see details.');
+            // open via Projects tab in detail
+            alert('Open this project from the Projects tab to see full details.');
           }}
         />
       ) : (
@@ -104,7 +108,7 @@ const HomeScreen: React.FC = () => {
         )}
       </View>
 
-      {/* Edit profile modal */}
+      {/* EDIT PROFILE MODAL */}
       <Modal visible={editVisible} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalContent}>
@@ -144,17 +148,29 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
     padding: theme.spacing(2)
   },
-  headerRow: {
+  profileCard: {
+    backgroundColor: theme.colors.card,
+    borderRadius: theme.radius.xl,
+    padding: theme.spacing(2),
+    marginBottom: theme.spacing(2),
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2
+  },
+  profileRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing(2)
+    marginBottom: theme.spacing(1)
   },
   avatar: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: theme.colors.card,
+    backgroundColor: theme.colors.background,
     alignItems: 'center',
     justifyContent: 'center'
   },
@@ -163,7 +179,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border
   },
   avatarInitials: {
-    color: theme.colors.text,
+    color: theme.colors.primaryDark,
     fontSize: theme.fontSize.lg,
     fontWeight: '700'
   },
@@ -173,17 +189,26 @@ const styles = StyleSheet.create({
     fontWeight: '700'
   },
   role: {
+    color: theme.colors.primaryDark,
+    fontSize: theme.fontSize.base,
+    fontWeight: '600'
+  },
+  location: {
     color: theme.colors.textSecondary,
-    fontSize: theme.fontSize.base
+    fontSize: theme.fontSize.sm
+  },
+  contactLine: {
+    color: theme.colors.textSecondary,
+    fontSize: theme.fontSize.sm
   },
   editText: {
-    color: theme.colors.accent,
+    color: theme.colors.primary,
     fontSize: theme.fontSize.sm,
     fontWeight: '500'
   },
   tagline: {
     color: theme.colors.textSecondary,
-    marginBottom: theme.spacing(2)
+    marginTop: theme.spacing(1)
   },
   emptyText: {
     color: theme.colors.textSecondary,
@@ -200,14 +225,16 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    backgroundColor: 'rgba(15, 23, 42, 0.3)',
     justifyContent: 'center',
     padding: theme.spacing(2)
   },
   modalContent: {
-    backgroundColor: theme.colors.background,
+    backgroundColor: theme.colors.card,
     borderRadius: theme.radius.xl,
-    padding: theme.spacing(2)
+    padding: theme.spacing(2),
+    borderWidth: 1,
+    borderColor: theme.colors.border
   },
   modalTitle: {
     color: theme.colors.text,

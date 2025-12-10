@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
@@ -17,7 +18,7 @@ function InnerLayout() {
 
   return (
     <Tabs
-      screenOptions={{
+      screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
           backgroundColor: theme.colors.card,
@@ -25,7 +26,7 @@ function InnerLayout() {
         },
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.textSecondary,
-        tabBarLabel: ({ focused, color, children }) => (
+        tabBarLabel: ({ focused, color }) => (
           <Text
             style={{
               color,
@@ -33,21 +34,31 @@ function InnerLayout() {
               fontWeight: focused ? '600' : '400'
             }}
           >
-            {children}
+            {route.name === 'index'
+              ? 'Home'
+              : route.name.charAt(0).toUpperCase() + route.name.slice(1)}
           </Text>
-        )
-      }}
+        ),
+        tabBarIcon: ({ focused, color, size }) => {
+          let iconName: keyof typeof Ionicons.glyphMap = 'home-outline';
+
+          if (route.name === 'index') {
+            iconName = focused ? 'home' : 'home-outline';
+          } else if (route.name === 'projects') {
+            iconName = focused ? 'briefcase' : 'briefcase-outline';
+          } else if (route.name === 'about') {
+            iconName = focused ? 'person' : 'person-outline';
+          } else if (route.name === 'contact') {
+            iconName = focused ? 'chatbubble' : 'chatbubble-outline';
+          }
+
+          return <Ionicons name={iconName} size={size} color={color} />;
+        }
+      })}
     >
-      {/* Home: app/index.tsx */}
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
-
-      {/* Projects: folder with stack (_layout.tsx inside projects/) */}
       <Tabs.Screen name="projects" options={{ title: 'Projects' }} />
-
-      {/* About: app/about.tsx */}
       <Tabs.Screen name="about" options={{ title: 'About' }} />
-
-      {/* Contact: app/contact.tsx */}
       <Tabs.Screen name="contact" options={{ title: 'Contact' }} />
     </Tabs>
   );

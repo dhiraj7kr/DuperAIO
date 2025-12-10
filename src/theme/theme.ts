@@ -1,13 +1,13 @@
 const palette = {
-  primary: '#2563EB',
+  primary: '#2563EB',       // blue
   primaryDark: '#1D4ED8',
-  background: '#0F172A',
-  card: '#111827',
-  border: '#1F2937',
-  text: '#F9FAFB',
-  textSecondary: '#9CA3AF',
-  accent: '#FBBF24',
-  danger: '#EF4444'
+  background: '#F9FAFB',    // light grey
+  card: '#FFFFFF',          // white cards
+  border: '#E5E7EB',        // light border
+  text: '#111827',          // dark text
+  textSecondary: '#6B7280', // grey text
+  accent: '#F59E0B',        // amber
+  danger: '#DC2626'         // red
 };
 
 export const theme = {

@@ -27,7 +27,9 @@ const ContactScreen: React.FC = () => {
       return;
     }
     const subject = encodeURIComponent(`Portfolio Contact from ${name}`);
-    const body = encodeURIComponent(`${message}\n\nFrom: ${name} <${email}>`);
+    const body = encodeURIComponent(
+      `${message}\n\nFrom: ${name} <${email}>\n\nPhone: ${contact.phone}`
+    );
     const mailto = `mailto:${contact.email}?subject=${subject}&body=${body}`;
     Linking.openURL(mailto).catch(() =>
       Alert.alert('Error', 'Could not open email client.')
@@ -43,11 +45,20 @@ const ContactScreen: React.FC = () => {
     <ScrollView style={styles.container}>
       <SectionHeader
         title="Contact"
-        subtitle="Send a quick message or reach me directly."
+        subtitle="Reach out for roles, collaborations, or freelance work."
       />
 
+      <View style={styles.infoCard}>
+        <Text style={styles.infoLabel}>Email</Text>
+        <Text style={styles.infoValue}>{contact.email}</Text>
+        <Text style={styles.infoLabel}>Phone</Text>
+        <Text style={styles.infoValue}>{contact.phone}</Text>
+        <Text style={styles.infoLabel}>Location</Text>
+        <Text style={styles.infoValue}>{profile.location}</Text>
+      </View>
+
       <Text style={styles.text}>
-        This sends an email to <Text style={styles.highlight}>{contact.email}</Text>.
+        Use the form below and I&apos;ll receive your message via email.
       </Text>
 
       <TextInputField label="Your Name" value={name} onChangeText={setName} />
@@ -67,7 +78,7 @@ const ContactScreen: React.FC = () => {
       <IconButton label="Send Message" onPress={sendMessage} />
 
       <SectionHeader
-        title="Or connect via"
+        title="Connect via"
         subtitle="Social profiles & direct links"
       />
 
@@ -99,8 +110,22 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginBottom: theme.spacing(2)
   },
-  highlight: {
-    color: theme.colors.accent
+  infoCard: {
+    backgroundColor: theme.colors.card,
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    padding: theme.spacing(2),
+    marginBottom: theme.spacing(2)
+  },
+  infoLabel: {
+    color: theme.colors.textSecondary,
+    fontSize: theme.fontSize.xs
+  },
+  infoValue: {
+    color: theme.colors.text,
+    fontSize: theme.fontSize.base,
+    marginBottom: 4
   },
   linksRow: {
     flexDirection: 'row',
