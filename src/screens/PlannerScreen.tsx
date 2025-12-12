@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -21,6 +23,7 @@ import {
   scheduleTaskReminder
 } from '../utils/alarmManager';
 
+// --- Types ---
 type RepeatRule = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 type TaskType = 'task' | 'event';
 
@@ -83,6 +86,7 @@ const occursOnDate = (task: Task, dateStr: string): boolean => {
     return isSameDay(base, current);
   }
 
+  // Tasks created in future shouldn't show in past
   if (current.getTime() < base.getTime()) return false;
 
   switch (task.repeat) {
@@ -293,7 +297,10 @@ const PlannerScreen: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      Alert.alert('Required', 'Please enter a title');
+      return;
+    }
 
     const nowIso = new Date().toISOString();
     const baseDateStr = formatYMD(formDate);
@@ -629,196 +636,226 @@ const PlannerScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      {/* Modal */}
-      <Modal transparent visible={modalVisible} animationType="slide">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeaderRow}>
+      {/* --- MODAL (FIXED SCROLLING & PADDING) --- */}
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContainer}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {editingTask ? 'Edit task' : 'New task'}
+                {editingTask ? 'Edit Task' : 'New Task'}
               </Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Ionicons name="close" size={22} color={theme.colors.text} />
+                <Ionicons name="close" size={24} color="#64748B" />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.modalLabel}>Title</Text>
-            <TextInput
-              style={styles.input}
-              value={title}
-              onChangeText={setTitle}
-              placeholder="What do you want to do?"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-
-            <Text style={styles.modalLabel}>Type</Text>
-            <View style={styles.chipRow}>
-              {(['task', 'event'] as TaskType[]).map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  style={[
-                    styles.chip,
-                    type === t && styles.chipSelected
-                  ]}
-                  onPress={() => setType(t)}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      type === t && styles.chipTextSelected
-                    ]}
-                  >
-                    {t === 'task' ? 'Task' : 'Event'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Date & Time */}
-            <Text style={styles.modalLabel}>Date</Text>
-            <TouchableOpacity
-              style={styles.inputLikeButton}
-              onPress={() => setShowDatePicker(true)}
+            {/* Scrollable Form Content */}
+            <ScrollView
+              style={styles.formScroll}
+              contentContainerStyle={styles.formScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
             >
-              <Text style={styles.inputLikeButtonText}>
-                {formatShortDate(formDate)}
-              </Text>
-            </TouchableOpacity>
+              {/* Title */}
+              <Text style={styles.modalLabel}>Title</Text>
+              <TextInput
+                style={styles.input}
+                value={title}
+                onChangeText={setTitle}
+                placeholder="What do you want to do?"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
 
-            <View style={styles.row}>
-              <View style={styles.rowItem}>
-                <Text style={styles.modalLabel}>Start time</Text>
-                <TouchableOpacity
-                  style={styles.inputLikeButton}
-                  onPress={() => setShowTimePicker(true)}
-                >
-                  <Text style={styles.inputLikeButtonText}>
-                    {startTime || 'Select time'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.rowItem}>
-                <Text style={styles.modalLabel}>End time</Text>
-                <TextInput
-                  style={styles.input}
-                  value={endTime}
-                  onChangeText={setEndTime}
-                  placeholder="10:30"
-                  placeholderTextColor={theme.colors.textSecondary}
-                />
-              </View>
-            </View>
-
-            {/* Repeat */}
-            <Text style={styles.modalLabel}>Repeat</Text>
-            <View style={styles.chipRow}>
-              {(['none', 'daily', 'weekly', 'monthly', 'yearly'] as RepeatRule[]).map(
-                (r) => (
+              {/* Type */}
+              <Text style={styles.modalLabel}>Type</Text>
+              <View style={styles.chipRow}>
+                {(['task', 'event'] as TaskType[]).map((t) => (
                   <TouchableOpacity
-                    key={r}
+                    key={t}
                     style={[
                       styles.chip,
-                      repeat === r && styles.chipSelected
+                      type === t && styles.chipSelected
                     ]}
-                    onPress={() => setRepeat(r)}
+                    onPress={() => setType(t)}
                   >
                     <Text
                       style={[
                         styles.chipText,
-                        repeat === r && styles.chipTextSelected
+                        type === t && styles.chipTextSelected
                       ]}
                     >
-                      {r === 'none'
-                        ? 'No repeat'
-                        : r.charAt(0).toUpperCase() + r.slice(1)}
+                      {t === 'task' ? 'Task' : 'Event'}
                     </Text>
                   </TouchableOpacity>
-                )
-              )}
-            </View>
+                ))}
+              </View>
 
-            {/* Reminder lead time */}
-            <Text style={styles.modalLabel}>Reminder</Text>
-            <View style={styles.chipRow}>
-              {[0, 5, 30].map((m) => (
-                <TouchableOpacity
-                  key={m}
-                  style={[
-                    styles.chip,
-                    alarmLead === (m as AlarmLeadMinutes) && styles.chipSelected
-                  ]}
-                  onPress={() => setAlarmLead(m as AlarmLeadMinutes)}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      alarmLead === (m as AlarmLeadMinutes) &&
-                        styles.chipTextSelected
-                    ]}
+              {/* Date */}
+              <Text style={styles.modalLabel}>Date</Text>
+              <TouchableOpacity
+                style={styles.inputLikeButton}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color="#64748B" style={{ marginRight: 8 }} />
+                <Text style={styles.inputLikeButtonText}>
+                  {formatShortDate(formDate)}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Time Row */}
+              <View style={styles.row}>
+                <View style={[styles.rowItem, { marginRight: 8 }]}>
+                  <Text style={styles.modalLabel}>Start Time</Text>
+                  <TouchableOpacity
+                    style={styles.inputLikeButton}
+                    onPress={() => setShowTimePicker(true)}
                   >
-                    {m === 0 ? 'None' : `${m} min before`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                    <Ionicons name="time-outline" size={20} color="#64748B" style={{ marginRight: 8 }} />
+                    <Text style={styles.inputLikeButtonText}>
+                      {startTime || 'Set time'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={[styles.rowItem, { marginLeft: 8 }]}>
+                  <Text style={styles.modalLabel}>End Time</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={endTime}
+                    onChangeText={setEndTime}
+                    placeholder="e.g. 10:30"
+                    placeholderTextColor={theme.colors.textSecondary}
+                  />
+                </View>
+              </View>
 
-            {/* Alarm mode */}
-            <Text style={styles.modalLabel}>Alarm mode</Text>
-            <View style={styles.chipRow}>
-              {(['silent', 'vibrate', 'sound'] as AlarmMode[]).map((mode) => (
-                <TouchableOpacity
-                  key={mode}
-                  style={[
-                    styles.chip,
-                    alarmMode === mode && styles.chipSelected
-                  ]}
-                  onPress={() => setAlarmMode(mode)}
-                >
-                  <Text
+              {/* Repeat */}
+              <Text style={styles.modalLabel}>Repeat</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.chipRow}>
+                  {(['none', 'daily', 'weekly', 'monthly', 'yearly'] as RepeatRule[]).map(
+                    (r) => (
+                      <TouchableOpacity
+                        key={r}
+                        style={[
+                          styles.chip,
+                          repeat === r && styles.chipSelected
+                        ]}
+                        onPress={() => setRepeat(r)}
+                      >
+                        <Text
+                          style={[
+                            styles.chipText,
+                            repeat === r && styles.chipTextSelected
+                          ]}
+                        >
+                          {r === 'none'
+                            ? 'No repeat'
+                            : r.charAt(0).toUpperCase() + r.slice(1)}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
+              </ScrollView>
+
+              {/* Reminder */}
+              <Text style={styles.modalLabel}>Reminder</Text>
+              <View style={styles.chipRow}>
+                {[0, 5, 30].map((m) => (
+                  <TouchableOpacity
+                    key={m}
                     style={[
-                      styles.chipText,
-                      alarmMode === mode && styles.chipTextSelected
+                      styles.chip,
+                      alarmLead === (m as AlarmLeadMinutes) && styles.chipSelected
                     ]}
+                    onPress={() => setAlarmLead(m as AlarmLeadMinutes)}
                   >
-                    {mode === 'silent'
-                      ? 'Silent'
-                      : mode === 'vibrate'
-                      ? 'Vibrate'
-                      : 'Sound'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                    <Text
+                      style={[
+                        styles.chipText,
+                        alarmLead === (m as AlarmLeadMinutes) &&
+                          styles.chipTextSelected
+                      ]}
+                    >
+                      {m === 0 ? 'None' : `${m} min before`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
 
-            {/* Description, link, associated */}
-            <Text style={styles.modalLabel}>Description</Text>
-            <TextInput
-              style={[styles.input, styles.notesInput]}
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Details, links, context..."
-              placeholderTextColor={theme.colors.textSecondary}
-              multiline
-            />
+              {/* Alarm Mode */}
+              <Text style={styles.modalLabel}>Alarm Mode</Text>
+              <View style={styles.chipRow}>
+                {(['silent', 'vibrate', 'sound'] as AlarmMode[]).map((mode) => (
+                  <TouchableOpacity
+                    key={mode}
+                    style={[
+                      styles.chip,
+                      alarmMode === mode && styles.chipSelected
+                    ]}
+                    onPress={() => setAlarmMode(mode)}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        alarmMode === mode && styles.chipTextSelected
+                      ]}
+                    >
+                      {mode === 'silent'
+                        ? 'Silent'
+                        : mode === 'vibrate'
+                        ? 'Vibrate'
+                        : 'Sound'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
 
-            <Text style={styles.modalLabel}>Link</Text>
-            <TextInput
-              style={styles.input}
-              value={link}
-              onChangeText={setLink}
-              placeholder="https://..."
-              placeholderTextColor={theme.colors.textSecondary}
-            />
+              {/* Description */}
+              <Text style={styles.modalLabel}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.notesInput]}
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Add details, context..."
+                placeholderTextColor={theme.colors.textSecondary}
+                multiline
+              />
 
-            <Text style={styles.modalLabel}>Associated (person / project)</Text>
-            <TextInput
-              style={styles.input}
-              value={associated}
-              onChangeText={setAssociated}
-              placeholder="e.g. Client name, project name"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
+              {/* Link */}
+              <Text style={styles.modalLabel}>Link</Text>
+              <TextInput
+                style={styles.input}
+                value={link}
+                onChangeText={setLink}
+                placeholder="https://..."
+                placeholderTextColor={theme.colors.textSecondary}
+              />
 
+              {/* Associated */}
+              <Text style={styles.modalLabel}>Associated With</Text>
+              <TextInput
+                style={styles.input}
+                value={associated}
+                onChangeText={setAssociated}
+                placeholder="Person or Project"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+              
+              {/* Spacer for scrolling past bottom fields */}
+              <View style={{ height: 40 }} />
+            </ScrollView>
+
+            {/* Footer Buttons */}
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonSecondary]}
@@ -831,37 +868,35 @@ const PlannerScreen: React.FC = () => {
                 onPress={handleSave}
               >
                 <Text style={styles.modalButtonPrimaryText}>
-                  {editingTask ? 'Save' : 'Add'}
+                  {editingTask ? 'Save Changes' : 'Create Task'}
                 </Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
 
-        {/* Date picker */}
+        {/* Date Picker Component */}
         {showDatePicker && (
           <DateTimePicker
             value={formDate}
             mode="date"
             display={Platform.OS === 'ios' ? 'spinner' : 'default'}
             onChange={(event: any, date?: Date) => {
-              setShowDatePicker(false);
-              if (date) {
-                setFormDate(date);
-              }
+              if (Platform.OS === 'android') setShowDatePicker(false);
+              if (date) setFormDate(date);
             }}
           />
         )}
 
-        {/* Time picker */}
+        {/* Time Picker Component - Fixed to 'time' mode */}
         {showTimePicker && (
           <DateTimePicker
             value={formDate}
             mode="time"
-            is24Hour
+            is24Hour={false}
             display={Platform.OS === 'ios' ? 'spinner' : 'default'}
             onChange={(event: any, date?: Date) => {
-              setShowTimePicker(false);
+              if (Platform.OS === 'android') setShowTimePicker(false);
               if (date) {
                 const hours = String(date.getHours()).padStart(2, '0');
                 const minutes = String(date.getMinutes()).padStart(2, '0');
@@ -887,7 +922,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: theme.spacing(2),
-    paddingTop: theme.spacing(14), // nice distance from top like Home
+    paddingTop: theme.spacing(14),
     paddingBottom: theme.spacing(4)
   },
   header: {
@@ -1107,48 +1142,63 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 2
   },
-  modalBackdrop: {
+  
+  // --- UPDATED MODAL STYLES ---
+  modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.4)',
-    justifyContent: 'center',
-    padding: theme.spacing(2)
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    justifyContent: 'flex-end'
   },
-  modalContent: {
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.radius.xl,
-    padding: theme.spacing(2),
-    borderWidth: 1,
-    borderColor: theme.colors.border
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    height: '80%', // Takes up 80% of screen height
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 10
   },
-  modalHeaderRow: {
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing(1)
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9'
   },
   modalTitle: {
-    fontSize: theme.fontSize.lg,
-    fontWeight: '600',
-    color: theme.colors.text
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1E293B'
+  },
+  formScroll: {
+    flex: 1
+  },
+  formScrollContent: {
+    paddingBottom: 20
   },
   modalLabel: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.textSecondary,
-    marginTop: theme.spacing(1)
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+    marginBottom: 8,
+    marginTop: 12
   },
   input: {
-    marginTop: 4,
-    borderRadius: theme.radius.lg,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#1E293B',
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.background
+    borderColor: '#E2E8F0'
   },
   notesInput: {
-    minHeight: 70,
+    minHeight: 80,
     textAlignVertical: 'top'
   },
   chipRow: {
@@ -1157,21 +1207,22 @@ const styles = StyleSheet.create({
     marginTop: 4
   },
   chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    marginRight: 6,
-    marginBottom: 6
+    borderColor: '#E2E8F0',
+    marginRight: 8,
+    marginBottom: 8,
+    backgroundColor: '#fff'
   },
   chipSelected: {
     backgroundColor: '#E0ECFF',
     borderColor: theme.colors.primary
   },
   chipText: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.textSecondary
+    fontSize: 13,
+    color: '#64748B'
   },
   chipTextSelected: {
     color: theme.colors.primary,
@@ -1185,43 +1236,50 @@ const styles = StyleSheet.create({
     flex: 1
   },
   inputLikeButton: {
-    marginTop: 4,
-    borderRadius: theme.radius.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    justifyContent: 'center'
+    borderColor: '#E2E8F0',
+    marginTop: 4
   },
   inputLikeButtonText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.text
+    fontSize: 16,
+    color: '#1E293B'
   },
   modalButtonsRow: {
     flexDirection: 'row',
-    marginTop: theme.spacing(2)
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9'
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: theme.radius.lg,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center'
   },
   modalButtonSecondary: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    marginRight: 8
+    borderColor: '#E2E8F0',
+    marginRight: 12,
+    backgroundColor: '#fff'
   },
   modalButtonPrimary: {
     backgroundColor: theme.colors.primary
   },
   modalButtonSecondaryText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.text
+    fontSize: 16,
+    color: '#1E293B',
+    fontWeight: '600'
   },
   modalButtonPrimaryText: {
-    fontSize: theme.fontSize.sm,
+    fontSize: 16,
     color: '#fff',
-    fontWeight: '600'
+    fontWeight: '700'
   }
 });

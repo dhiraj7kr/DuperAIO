@@ -1,8 +1,12 @@
 // src/components/TaskAlarmHandler.tsx
+import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Animated,
+  Dimensions,
   Modal,
+  PanResponder,
   Platform,
   StyleSheet,
   Text,
@@ -14,6 +18,9 @@ import { theme } from '../theme/theme';
 
 // Make sure this path matches your file structure
 import { ANDROID_CHANNEL_ID } from '../utils/alarmManager';
+
+const { width } = Dimensions.get('window');
+const SLIDE_THRESHOLD = width * 0.35; // Increased slightly to prevent accidental swipes
 
 interface TaskAlarmHandlerProps {
   children: React.ReactNode;
@@ -28,20 +35,32 @@ interface ActiveAlarm {
 
 const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
   const [activeAlarm, setActiveAlarm] = useState<ActiveAlarm | null>(null);
+  const [snoozeMinutes, setSnoozeMinutes] = useState<5 | 30>(5);
+
+  // 1. FIX: Use a Ref to track snooze time so PanResponder can read the LATEST value
+  const snoozeMinutesRef = useRef<5 | 30>(5);
+  // 2. FIX: Use a Ref to track the alarm object inside the gesture
+  const activeAlarmRef = useRef<ActiveAlarm | null>(null);
+
+  // Sync state to refs
+  useEffect(() => {
+    snoozeMinutesRef.current = snoozeMinutes;
+  }, [snoozeMinutes]);
+
+  useEffect(() => {
+    activeAlarmRef.current = activeAlarm;
+  }, [activeAlarm]);
 
   // ---------------------------------------------------------
-  // 1. Continuous Vibration Logic
+  // 3. Continuous Vibration Logic
   // ---------------------------------------------------------
   useEffect(() => {
     let iosInterval: any;
 
     if (activeAlarm) {
       if (Platform.OS === 'android') {
-        // Android: [wait 0ms, vibrate 500ms, wait 1000ms]
-        // 'true' means loop indefinitely
         Vibration.vibrate([0, 500, 1000], true);
       } else {
-        // iOS simulation
         Vibration.vibrate();
         iosInterval = setInterval(() => {
           Vibration.vibrate();
@@ -49,7 +68,6 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
       }
     }
 
-    // CLEANUP: Runs when activeAlarm becomes null (Closed/Snoozed)
     return () => {
       Vibration.cancel();
       if (iosInterval) clearInterval(iosInterval);
@@ -57,15 +75,16 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
   }, [activeAlarm]);
 
   // ---------------------------------------------------------
-  // 2. Notification Listeners (Updated for Snooze/Stop Actions)
+  // 4. Notification Listeners
   // ---------------------------------------------------------
   useEffect(() => {
-    // A. Foreground notification received
     const receivedSub =
       Notifications.addNotificationReceivedListener((notification) => {
         const { title, body, data } = notification.request.content;
         const notificationId = notification.request.identifier;
-
+        
+        // When alarm triggers, reset everything
+        setSnoozeMinutes(5); 
         setActiveAlarm({
           notificationId,
           title: title ?? 'Task reminder',
@@ -74,7 +93,6 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
         });
       });
 
-    // B. User INTERACTED with the notification (Tapped Body, Snooze, or Stop)
     const responseSub =
       Notifications.addNotificationResponseReceivedListener(async (response) => {
         const n = response.notification;
@@ -89,21 +107,13 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
           taskId: (data as any)?.taskId
         };
 
-        // HANDLE BUTTON CLICKS
         if (actionId === 'snooze') {
-          // User clicked "Snooze 5 min" on the notification
-          await performSnooze(alarmData);
-          setActiveAlarm(null); // Ensure modal is closed
-        } 
-        else if (actionId === 'stop') {
-          // User clicked "Stop" on the notification
-          // We just dismiss the system notification and ensure no modal
+          await performSnooze(alarmData, 5);
+          setActiveAlarm(null);
+        } else if (actionId === 'stop') {
           await Notifications.dismissNotificationAsync(notificationId);
           setActiveAlarm(null);
-        } 
-        else {
-          // Default: User tapped the notification body
-          // Open the modal and start vibration loop
+        } else {
           setActiveAlarm(alarmData);
         }
       });
@@ -115,21 +125,18 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
   }, []);
 
   // ---------------------------------------------------------
-  // 3. Logic Helpers
+  // 5. Logic Helpers
   // ---------------------------------------------------------
-  
-  const performSnooze = async (alarm: ActiveAlarm) => {
-    // 1. Dismiss old notification
+  const performSnooze = async (alarm: ActiveAlarm, minutes: number) => {
     if (alarm.notificationId) {
       try {
         await Notifications.dismissNotificationAsync(alarm.notificationId);
-      } catch (e) {
-        console.warn('Failed to dismiss original notification', e);
-      }
+      } catch (e) {}
     }
 
-    // 2. Schedule new one in 5 mins
-    const snoozeTime = new Date(Date.now() + 5 * 60 * 1000);
+    const snoozeTime = new Date(Date.now() + minutes * 60 * 1000);
+    
+    // Cast to 'any' to fix TS error
     const trigger: any = {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
       date: snoozeTime,
@@ -140,10 +147,10 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
       await Notifications.scheduleNotificationAsync({
         content: {
           title: alarm.title,
-          body: 'Snoozed: ' + (alarm.body || 'Task reminder'),
+          body: `Snoozed (${minutes}m): ` + (alarm.body || 'Task reminder'),
           data: alarm.taskId ? { taskId: alarm.taskId } : undefined,
           sound: 'default',
-          categoryIdentifier: 'alarm', // Maintain category for the snoozed alarm
+          categoryIdentifier: 'alarm',
           priority: Notifications.AndroidNotificationPriority.MAX,
         },
         trigger,
@@ -153,24 +160,97 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
     }
   };
 
-  // ---------------------------------------------------------
-  // 4. Modal Handlers (UI Buttons)
-  // ---------------------------------------------------------
+  const executeSnooze = async () => {
+    const alarm = activeAlarmRef.current;
+    if (!alarm) return;
+    
+    // Use the value from REF to ensure it's the latest choice (5 or 30)
+    await performSnooze(alarm, snoozeMinutesRef.current);
+    setActiveAlarm(null);
+  };
 
-  const handleClose = async () => {
-    setActiveAlarm(null); // Stops vibration via useEffect
-    if (activeAlarm?.notificationId) {
-       try {
-         await Notifications.dismissNotificationAsync(activeAlarm.notificationId);
-       } catch (e) {}
+  const executeClose = async () => {
+    const alarm = activeAlarmRef.current;
+    if (!alarm) return;
+
+    if (alarm.notificationId) {
+      try {
+        await Notifications.dismissNotificationAsync(alarm.notificationId);
+      } catch (e) {}
     }
+    setActiveAlarm(null);
   };
 
-  const handleSnooze = async () => {
-    if (!activeAlarm) return;
-    await performSnooze(activeAlarm);
-    setActiveAlarm(null); // Close modal & Stop vibration
-  };
+  // ---------------------------------------------------------
+  // 6. Animation & PanResponder
+  // ---------------------------------------------------------
+  const pan = useRef(new Animated.ValueXY()).current;
+  const slideOpacity = useRef(new Animated.Value(1)).current;
+
+  // Reset when alarm opens
+  useEffect(() => {
+    if (activeAlarm) {
+      pan.setValue({ x: 0, y: 0 });
+      slideOpacity.setValue(1);
+    }
+  }, [activeAlarm]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderMove: (_, gestureState) => {
+        pan.setValue({ x: gestureState.dx, y: 0 });
+        const opacity = 1 - Math.abs(gestureState.dx) / (width * 0.4);
+        slideOpacity.setValue(Math.max(0, opacity));
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        // --- RIGHT: SNOOZE ---
+        if (gestureState.dx > SLIDE_THRESHOLD) {
+          // 1. Stop vibration IMMEDIATELY so it doesn't get stuck
+          Vibration.cancel();
+          
+          Animated.timing(pan, {
+            toValue: { x: width, y: 0 },
+            duration: 200,
+            useNativeDriver: false,
+          }).start(() => {
+            executeSnooze(); // Runs after animation
+          });
+        } 
+        // --- LEFT: CLOSE ---
+        else if (gestureState.dx < -SLIDE_THRESHOLD) {
+          // 1. Stop vibration IMMEDIATELY
+          Vibration.cancel();
+
+          Animated.timing(pan, {
+            toValue: { x: -width, y: 0 },
+            duration: 200,
+            useNativeDriver: false,
+          }).start(() => {
+            executeClose();
+          });
+        } 
+        // --- RESET ---
+        else {
+          Animated.spring(pan, {
+            toValue: { x: 0, y: 0 },
+            useNativeDriver: false,
+          }).start();
+          Animated.timing(slideOpacity, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: false,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  const backgroundColor = pan.x.interpolate({
+    inputRange: [-width, 0, width],
+    outputRange: ['#EF4444', '#1E293B', '#3B82F6'], // Red -> Dark -> Blue
+    extrapolate: 'clamp',
+  });
 
   const visible = !!activeAlarm;
 
@@ -178,32 +258,81 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
     <>
       {children}
 
-      <Modal transparent visible={visible} animationType="fade">
-        <View style={styles.backdrop}>
-          <View style={styles.card}>
-            <Text style={styles.title}>
-              {activeAlarm?.title ?? 'Task reminder'}
+      <Modal visible={visible} transparent animationType="fade">
+        <Animated.View style={[styles.fullScreenContainer, { backgroundColor }]}>
+          
+          <View style={styles.header}>
+            <Ionicons name="alarm" size={48} color="#fff" />
+            <Text style={styles.alarmTitle}>
+              {activeAlarm?.title ?? 'Task Reminder'}
             </Text>
-            {activeAlarm?.body ? (
-              <Text style={styles.body}>{activeAlarm.body}</Text>
-            ) : null}
+            <Text style={styles.alarmBody}>{activeAlarm?.body}</Text>
+          </View>
 
-            <View style={styles.buttonRow}>
+          <View style={styles.snoozeSelectorContainer}>
+            <Text style={styles.snoozeLabel}>Snooze duration:</Text>
+            <View style={styles.selectorRow}>
               <TouchableOpacity
-                style={[styles.button, styles.secondaryButton]}
-                onPress={handleClose}
+                style={[
+                  styles.selectorBtn,
+                  snoozeMinutes === 5 && styles.selectorBtnActive
+                ]}
+                onPress={() => setSnoozeMinutes(5)}
               >
-                <Text style={styles.secondaryText}>Close</Text>
+                <Text
+                  style={[
+                    styles.selectorText,
+                    snoozeMinutes === 5 && styles.selectorTextActive
+                  ]}
+                >
+                  5 min
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.button, styles.primaryButton]}
-                onPress={handleSnooze}
+                style={[
+                  styles.selectorBtn,
+                  snoozeMinutes === 30 && styles.selectorBtnActive
+                ]}
+                onPress={() => setSnoozeMinutes(30)}
               >
-                <Text style={styles.primaryText}>Snooze 5 min</Text>
+                <Text
+                  style={[
+                    styles.selectorText,
+                    snoozeMinutes === 30 && styles.selectorTextActive
+                  ]}
+                >
+                  30 min
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+
+          <View style={styles.sliderContainer}>
+            <View style={styles.track}>
+              <Animated.View style={{ opacity: slideOpacity, flexDirection: 'row', justifyContent: 'space-between', width: '100%', paddingHorizontal: 20 }}>
+                <View style={styles.slideLabelRow}>
+                  <Ionicons name="close" size={20} color="#fff" />
+                  <Text style={styles.trackText}>Slide to Close</Text>
+                </View>
+                <View style={styles.slideLabelRow}>
+                  <Text style={styles.trackText}>Snooze</Text>
+                  <Ionicons name="chevron-forward" size={20} color="#fff" />
+                </View>
+              </Animated.View>
+            </View>
+
+            <Animated.View
+              {...panResponder.panHandlers}
+              style={[
+                styles.knob,
+                { transform: [{ translateX: pan.x }] }
+              ]}
+            >
+              <Ionicons name="code-working" size={24} color={theme.colors.primary} />
+            </Animated.View>
+          </View>
+
+        </Animated.View>
       </Modal>
     </>
   );
@@ -212,59 +341,99 @@ const TaskAlarmHandler: React.FC<TaskAlarmHandlerProps> = ({ children }) => {
 export default TaskAlarmHandler;
 
 const styles = StyleSheet.create({
-  backdrop: {
+  fullScreenContainer: {
     flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: theme.spacing(2)
+    padding: 30,
   },
-  card: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.radius.xl,
-    padding: theme.spacing(2),
-    borderWidth: 1,
-    borderColor: theme.colors.border
+  header: {
+    alignItems: 'center',
+    marginBottom: 50,
   },
-  title: {
-    fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.text
-  },
-  body: {
-    marginTop: 4,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.textSecondary
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    marginTop: theme.spacing(2)
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: theme.radius.lg,
-    alignItems: 'center'
-  },
-  secondaryButton: {
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    marginRight: 8,
-    backgroundColor: '#fff' 
-  },
-  primaryButton: {
-    backgroundColor: theme.colors.primary
-  },
-  secondaryText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.text,
-    fontWeight: '600'
-  },
-  primaryText: {
-    fontSize: theme.fontSize.sm,
+  alarmTitle: {
     color: '#fff',
-    fontWeight: '600'
-  }
+    fontSize: 28,
+    fontWeight: '800',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  alarmBody: {
+    color: '#CBD5E1',
+    fontSize: 16,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  snoozeSelectorContainer: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  snoozeLabel: {
+    color: '#94A3B8',
+    fontSize: 14,
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  selectorRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 99,
+    padding: 4,
+  },
+  selectorBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 99,
+  },
+  selectorBtnActive: {
+    backgroundColor: '#fff',
+  },
+  selectorText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  selectorTextActive: {
+    color: '#0F172A',
+  },
+  sliderContainer: {
+    width: '100%',
+    height: 70,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  track: {
+    position: 'absolute',
+    width: '100%',
+    height: 60,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  trackText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+    marginHorizontal: 5,
+  },
+  slideLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  knob: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 5,
+  },
 });
