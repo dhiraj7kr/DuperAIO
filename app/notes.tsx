@@ -10,6 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  AppState,
   Easing,
   FlatList,
   Keyboard,
@@ -68,7 +69,7 @@ type AppDataStore = {
 
 // @ts-ignore
 const docDir = FileSystem.documentDirectory || ''; 
-const DATA_FILE_URI = docDir + 'app_data_notes_v9.json';
+const DATA_FILE_URI = docDir + 'app_data_notes_v10.json';
 
 // ==========================================
 // 2. HELPER FUNCTIONS & STORAGE
@@ -166,7 +167,7 @@ export default function NotesScreen() {
 }
 
 // ==========================================
-// 4. TAB 1: NOTES
+// 4. TAB 1: NOTES (UNCHANGED)
 // ==========================================
 
 const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) => void }) => {
@@ -307,7 +308,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         <Ionicons name="add" size={32} color="#FFF" />
       </TouchableOpacity>
 
-      {/* Editor Modal */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <View style={styles.modalHeader}>
@@ -338,7 +338,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Auth Modal */}
       <Modal visible={authVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
            <View style={styles.miniModal}>
@@ -356,7 +355,7 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
 };
 
 // ==========================================
-// 5. TAB 2: READ LATER
+// 5. TAB 2: READ LATER (UNCHANGED)
 // ==========================================
 
 const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: LinkItem[]) => void }) => {
@@ -474,7 +473,7 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
 };
 
 // ==========================================
-// 6. TAB 3: VOICE NOTES
+// 6. TAB 3: VOICE NOTES (UPDATED: FOREGROUND SERVICE FIX)
 // ==========================================
 
 const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setVoiceNotes: (v: VoiceNote[]) => void }) => {
@@ -504,16 +503,38 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
   const [renameId, setRenameId] = useState<string|null>(null);
   const [newName, setNewName] = useState('');
 
-  const timerRef = useRef<NodeJS.Timeout | number | null>(null);
+  const appState = useRef(AppState.currentState);
+
+  // 1. RE-SYNC ANIMATION ON APP FOREGROUND
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        if (recording) {
+              startPulseAnimation();
+              // Native OnRecordingStatusUpdate will automatically sync the timer
+        }
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [recording]);
+
+  // 2. ANIMATION LOGIC
+  const startPulseAnimation = () => {
+    Animated.loop(
+        Animated.sequence([
+          Animated.timing(recordingAnim, { toValue: 1.2, duration: 800, useNativeDriver: true }),
+          Animated.timing(recordingAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        ])
+    ).start();
+  };
 
   useEffect(() => {
     if (recording) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(recordingAnim, { toValue: 0.4, duration: 800, useNativeDriver: true }),
-          Animated.timing(recordingAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-        ])
-      ).start();
+      startPulseAnimation();
     } else {
       recordingAnim.setValue(1);
     }
@@ -524,7 +545,7 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
       Animated.loop(
         Animated.sequence([
           Animated.timing(playbackAnim, { toValue: 1, duration: 500, easing: Easing.linear, useNativeDriver: true }),
-          Animated.timing(playbackAnim, { toValue: 0.5, duration: 500, easing: Easing.linear, useNativeDriver: true })
+          Animated.timing(playbackAnim, { toValue: 0.3, duration: 500, easing: Easing.linear, useNativeDriver: true })
         ])
       ).start();
     } else {
@@ -535,34 +556,86 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
   useEffect(() => {
     return () => {
       if(sound) sound.unloadAsync();
-      if(timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
 
+  // 3. START RECORDING (UPDATED WITH FOREGROUND SERVICE)
   const startRecording = async () => {
     try {
       const perm = await Audio.requestPermissionsAsync();
-      if(perm.status !== 'granted') return;
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      if (perm.status !== 'granted') return;
+
+      // REQUIRED: Enable background + foreground service
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
+      const recordingOptions: Audio.RecordingOptions = {
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+        } as any,
+        ios: {
+          extension: '.m4a',
+          audioQuality: Audio.IOSAudioQuality.HIGH,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {
+          mimeType: 'audio/webm',
+          bitsPerSecond: 128000,
+        },
+      };
+
+      const { recording } = await Audio.Recording.createAsync(recordingOptions);
+
+      // Native status sync
+      recording.setOnRecordingStatusUpdate((status) => {
+        if (status.isRecording) {
+          setTimer(Math.floor(status.durationMillis / 1000));
+        }
+      });
+
+      await recording.setProgressUpdateInterval(1000);
       setRecording(recording);
-      setTimer(0);
-      timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
-    } catch(e) { console.error(e); }
+
+    } catch (e) {
+      console.error('Recording failed', e);
+    }
   };
 
   const stopRecording = async () => {
     if(!recording) return;
-    if(timerRef.current) clearInterval(timerRef.current);
-    await recording.stopAndUnloadAsync();
-    const uri = recording.getURI();
-    setRecording(null);
-    if (uri) {
-      setTempUri(uri);
-      setSaveName(`Recording ${voiceNotes.length + 1}`);
-      setSaveLocked(false);
-      setSavePin('');
-      setSaveModalVisible(true);
+    
+    try {
+        await recording.stopAndUnloadAsync();
+        const uri = recording.getURI();
+        
+        // Remove listener
+        recording.setOnRecordingStatusUpdate(null);
+        setRecording(null);
+        
+        if (uri) {
+          setTempUri(uri);
+          setSaveName(`Voice Memo ${voiceNotes.length + 1}`);
+          setSaveLocked(false);
+          setSavePin('');
+          setSaveModalVisible(true);
+        }
+    } catch (e) {
+        console.error('Failed to stop recording', e);
     }
   };
 
@@ -624,6 +697,7 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
       setPlayingId(null);
     }
     try {
+       await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: true });
        const { sound: newSound } = await Audio.Sound.createAsync({ uri: item.uri }, { isLooping });
        setSound(newSound);
        setPlayingId(item.id);
@@ -638,12 +712,6 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
     const newVal = !isLooping;
     setIsLooping(newVal);
     if(sound) await sound.setIsLoopingAsync(newVal);
-  };
-
-  const shareVoice = async (uri: string) => {
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(uri);
-    }
   };
 
   const deleteVoice = (id: string) => {
@@ -666,70 +734,81 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
 
   return (
     <View style={styles.flex1}>
-      <View style={styles.recorderArea}>
-        <View style={styles.timerBox}>
-           <Text style={styles.timerText}>{formatTime(timer)}</Text>
-           {recording && <Animated.View style={[styles.redDot, { opacity: recordingAnim }]} />}
+      {/* 1. FIXED RECORDER AREA (Top) */}
+      <View style={styles.modernRecorder}>
+        <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20}}>
+            <View>
+                <Text style={styles.modernTimerLabel}>{recording ? 'RECORDING' : 'READY'}</Text>
+                <Text style={styles.modernTimerText}>{formatTime(timer)}</Text>
+            </View>
+            <TouchableOpacity onPress={recording ? stopRecording : startRecording}>
+                <Animated.View style={[
+                    styles.recordButtonOuter, 
+                    recording ? { transform: [{ scale: recordingAnim }], borderColor: theme.colors.danger } : {}
+                ]}>
+                    <View style={[styles.recordButtonInner, { backgroundColor: recording ? theme.colors.danger : theme.colors.primary }]}>
+                          {recording && <View style={styles.stopSquare} />}
+                    </View>
+                </Animated.View>
+            </TouchableOpacity>
         </View>
-        <TouchableOpacity style={[styles.recordBtn, recording && styles.recordBtnActive]} onPress={recording ? stopRecording : startRecording}>
-           <Ionicons name={recording ? "stop" : "mic"} size={32} color="#FFF" />
-        </TouchableOpacity>
-        <Text style={styles.recordLabel}>{recording ? 'Recording...' : 'Tap to Record'}</Text>
+        <Text style={{textAlign:'center', marginTop: 10, color: '#999', fontSize: 12}}>
+            {recording ? 'App background recording active' : 'Tap to start • Tap again to stop'}
+        </Text>
       </View>
 
-      <FlatList
-        data={voiceNotes}
-        keyExtractor={item => item.id}
-        contentContainerStyle={{ padding: 16 }}
-        renderItem={({ item }) => (
-          <SwipeableItem 
-            onSwipeRight={() => deleteVoice(item.id)} 
-            onSwipeLeft={() => openRename(item)}
-          >
-            <View style={styles.playerCard}>
-               <View style={styles.playerHeader}>
-                  <View style={styles.playerIconBox}>
-                     <Ionicons name="musical-notes" size={20} color="#fff" />
-                  </View>
-                  <View style={{flex:1}}>
-                     <Text style={styles.playerTitle} numberOfLines={1}>{item.name}</Text>
-                     <Text style={styles.playerSub}>{formatTime(item.durationSeconds)} • {new Date(item.createdAt).toLocaleDateString()}</Text>
-                  </View>
-                  {item.isLocked && <Ionicons name="lock-closed" size={16} color={theme.colors.danger} />}
-               </View>
+      {/* 2. SCROLLABLE LIST AREA (Bottom) */}
+      <View style={styles.listContainer}>
+          <View style={styles.listHeader}>
+             <Text style={styles.listHeaderTitle}>YOUR RECORDINGS ({voiceNotes.length})</Text>
+          </View>
 
-               <View style={styles.visualizerContainer}>
-                  {[...Array(20)].map((_, i) => (
-                     <Animated.View 
-                       key={i} 
-                       style={[
-                         styles.visualizerBar, 
-                         { 
-                           height: playingId === item.id ? (i % 2 === 0 ? 12 : 20) : 4,
-                           opacity: playingId === item.id ? playbackAnim : 0.3,
-                           backgroundColor: playingId === item.id ? theme.colors.primary : '#ccc'
-                         }
-                       ]} 
-                     />
-                  ))}
-               </View>
+          <FlatList
+            data={voiceNotes}
+            keyExtractor={item => item.id}
+            contentContainerStyle={{ paddingBottom: 40 }}
+            showsVerticalScrollIndicator={true}
+            ItemSeparatorComponent={() => <View style={styles.listSeparator} />}
+            renderItem={({ item }) => (
+              <SwipeableItem 
+                onSwipeRight={() => deleteVoice(item.id)} 
+                onSwipeLeft={() => openRename(item)}
+              >
+                <View style={[styles.listViewItem, playingId === item.id && { backgroundColor: '#F0F9FF' }]}>
+                    {/* Play Button */}
+                    <TouchableOpacity 
+                        onPress={() => handlePlayPress(item)} 
+                        style={[styles.listPlayBtn, playingId === item.id && { backgroundColor: theme.colors.primary }]}
+                    >
+                        <Ionicons name={playingId === item.id ? "pause" : "play"} size={18} color={playingId === item.id ? "#FFF" : theme.colors.primary} />
+                    </TouchableOpacity>
 
-               <View style={styles.playerControls}>
-                  <TouchableOpacity onPress={() => shareVoice(item.uri)} style={styles.ctrlBtn}>
-                     <Ionicons name="share-social-outline" size={20} color="#666" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={toggleLoop} style={styles.ctrlBtn}>
-                     <MaterialCommunityIcons name="repeat" size={20} color={isLooping && playingId === item.id ? theme.colors.primary : "#ccc"} />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handlePlayPress(item)} style={styles.bigPlayBtn}>
-                     <Ionicons name={playingId === item.id ? "pause" : "play"} size={28} color="#fff" />
-                  </TouchableOpacity>
-                  <View style={{width: 36}} /> 
-               </View>
-            </View>
-          </SwipeableItem>
-        )}
-      />
+                    {/* Metadata */}
+                    <View style={{flex: 1, paddingHorizontal: 12}}>
+                        <Text style={[styles.listTitle, playingId === item.id && { color: theme.colors.primary }]} numberOfLines={1}>{item.name}</Text>
+                        <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
+                           <Text style={styles.listSub}>{new Date(item.createdAt).toLocaleDateString()} • {formatTime(item.durationSeconds)}</Text>
+                           {/* Mini Visualization */}
+                           {playingId === item.id && (
+                               <View style={{flexDirection:'row', marginLeft: 8, alignItems: 'flex-end', height: 12, gap: 2}}>
+                                    {[1,2,3,4].map(i => <Animated.View key={i} style={{width: 2, height: 8, backgroundColor: theme.colors.primary, opacity: playbackAnim}} />)}
+                               </View>
+                           )}
+                        </View>
+                    </View>
+
+                    {/* Controls */}
+                    <View style={{flexDirection:'row', alignItems:'center'}}>
+                        {item.isLocked && <Ionicons name="lock-closed" size={14} color={theme.colors.danger} style={{marginRight: 10}} />}
+                        <TouchableOpacity onPress={toggleLoop} style={{padding: 6}}>
+                            <MaterialCommunityIcons name="repeat" size={18} color={isLooping && playingId === item.id ? theme.colors.primary : "#ccc"} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+              </SwipeableItem>
+            )}
+          />
+      </View>
 
       {/* SAVE MODAL */}
       <Modal visible={saveModalVisible} transparent animationType="fade">
@@ -782,17 +861,15 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
 };
 
 // ==========================================
-// 7. SWIPEABLE ITEM COMPONENT (BUG FIXED)
+// 7. SWIPEABLE ITEM COMPONENT
 // ==========================================
 
 const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { children: React.ReactNode, onSwipeRight: () => void, onSwipeLeft: () => void, onPress?: () => void }) => {
   const pan = useRef(new Animated.ValueXY()).current;
   
-  // Create refs to hold the latest version of the callback functions
   const onSwipeRightRef = useRef(onSwipeRight);
   const onSwipeLeftRef = useRef(onSwipeLeft);
 
-  // Update refs when props change (this fixes the stale closure bug)
   useEffect(() => {
     onSwipeRightRef.current = onSwipeRight;
     onSwipeLeftRef.current = onSwipeLeft;
@@ -801,7 +878,6 @@ const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { child
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        // Only capture horizontal movements bigger than vertical ones
         return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
       },
       onPanResponderMove: Animated.event([null, { dx: pan.x }], { useNativeDriver: false }),
@@ -809,9 +885,7 @@ const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { child
         if (gestureState.dx > 100) {
           // Right Swipe (Delete)
           Animated.timing(pan, { toValue: { x: 500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => {
-             // Use the ref to call the latest function
              if (onSwipeRightRef.current) onSwipeRightRef.current();
-             // Snap back instantly so the next item taking this place isn't offset
              pan.setValue({ x: 0, y: 0 });
           });
         } else if (gestureState.dx < -100) {
@@ -828,15 +902,25 @@ const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { child
     })
   ).current;
 
+  // Visual cues for swipe actions
+  const deleteOpacity = pan.x.interpolate({ inputRange: [0, 100], outputRange: [0, 1] });
+  const editOpacity = pan.x.interpolate({ inputRange: [-100, 0], outputRange: [1, 0] });
+
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.swipeBackLayer}>
-         <View style={styles.swipeLeftAction}><Ionicons name="trash" size={24} color="#fff" /></View>
-         <View style={styles.swipeRightAction}><MaterialIcons name="edit" size={24} color="#fff" /></View>
+         <Animated.View style={[styles.swipeLeftAction, { opacity: deleteOpacity }]}>
+            <Ionicons name="trash" size={24} color="#fff" />
+            <Text style={{color:'#fff', fontWeight:'bold', marginLeft: 8}}>DELETE</Text>
+         </Animated.View>
+         <Animated.View style={[styles.swipeRightAction, { opacity: editOpacity }]}>
+            <Text style={{color:'#fff', fontWeight:'bold', marginRight: 8}}>RENAME</Text>
+            <MaterialIcons name="edit" size={24} color="#fff" />
+         </Animated.View>
       </View>
       <Animated.View style={[{ transform: [{ translateX: pan.x }] }]} {...panResponder.panHandlers}>
         <TouchableOpacity activeOpacity={0.9} onPress={onPress}>
-           {children}
+            {children}
         </TouchableOpacity>
       </Animated.View>
     </View>
@@ -871,33 +955,46 @@ const styles = StyleSheet.create({
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', height: 44 },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: '#333' },
   fab: { position: 'absolute', bottom: 24, right: 24, width: 60, height: 60, borderRadius: 30, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center', shadowColor: theme.colors.primary, shadowOpacity: 0.4, shadowOffset: {width:0, height:4}, shadowRadius: 8, elevation: 6 },
-  swipeContainer: { marginBottom: 12, marginHorizontal: 16, position: 'relative' },
-  swipeBackLayer: { position: 'absolute', top: 1, bottom: 1, left: 2, right: 2, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  swipeLeftAction: { backgroundColor: '#EF4444', position: 'absolute', left: 0, top: 0, bottom: 0, width: '50%', borderTopLeftRadius: 12, borderBottomLeftRadius: 12, justifyContent: 'center', paddingLeft: 20 },
-  swipeRightAction: { backgroundColor: '#3B82F6', position: 'absolute', right: 0, top: 0, bottom: 0, width: '50%', borderTopRightRadius: 12, borderBottomRightRadius: 12, justifyContent: 'center', alignItems: 'flex-end', paddingRight: 20 },
-  noteCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#F3F4F6', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 6, elevation: 1 },
+  swipeContainer: { marginHorizontal: 16, position: 'relative' },
+  swipeBackLayer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, borderRadius: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  swipeLeftAction: { backgroundColor: '#EF4444', position: 'absolute', left: 0, top: 0, bottom: 0, width: '100%', justifyContent: 'flex-start', alignItems:'center', flexDirection:'row', paddingLeft: 20 },
+  swipeRightAction: { backgroundColor: '#3B82F6', position: 'absolute', right: 0, top: 0, bottom: 0, width: '100%', justifyContent: 'flex-end', alignItems:'center', flexDirection:'row', paddingRight: 20 },
+  
+  // Note Styles
+  noteCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#F3F4F6', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 6, elevation: 1, marginBottom: 12 },
   noteCardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   noteCardTitle: { fontSize: 17, fontWeight: '700', color: '#1F2937', flex: 1 },
   noteCardPreview: { fontSize: 14, color: '#6B7280', lineHeight: 20, height: 40 },
   noteCardFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F9FAFB' },
   noteDate: { fontSize: 12, color: '#9CA3AF' },
-  linkCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+  
+  // Link Styles
+  linkCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 12 },
   linkHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   iconCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
   linkTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
   linkDesc: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  visitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primary, paddingVertical: 8, borderRadius: 8, marginTop: 10 },
   visitBtnText: { color: '#fff', fontWeight: '600', marginRight: 6, fontSize: 13 },
-  playerCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB', shadowColor:'#000', shadowOpacity:0.03, shadowRadius:5 },
-  playerHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  playerIconBox: { width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  playerTitle: { fontSize: 16, fontWeight: '700', color: '#333' },
-  playerSub: { fontSize: 12, color: '#888', marginTop: 2 },
-  visualizerContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 40, marginBottom: 16, gap: 4 },
-  visualizerBar: { width: 4, borderRadius: 2 },
-  playerControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
-  ctrlBtn: { padding: 8 },
-  bigPlayBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: theme.colors.primary, shadowOpacity: 0.4, shadowRadius: 8 },
+  
+  // Modern Voice Tab Styles
+  modernRecorder: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingVertical: 20, paddingHorizontal: 16, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 4, elevation: 2, zIndex: 10 },
+  recordButtonOuter: { width: 64, height: 64, borderRadius: 32, borderWidth: 4, borderColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' },
+  recordButtonInner: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  stopSquare: { width: 16, height: 16, borderRadius: 2, backgroundColor: '#FFF' },
+  modernTimerLabel: { fontSize: 12, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.5 },
+  modernTimerText: { fontSize: 36, fontWeight: '200', color: '#111827', fontVariant: ['tabular-nums'] },
+  
+  // New List View Styles
+  listContainer: { flex: 1, backgroundColor: '#fff' },
+  listHeader: { paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#F9FAFB', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  listHeaderTitle: { fontSize: 12, fontWeight: '700', color: '#6B7280', letterSpacing: 0.5 },
+  listViewItem: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#fff' },
+  listPlayBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+  listTitle: { fontSize: 15, fontWeight: '600', color: '#1F2937' },
+  listSub: { fontSize: 12, color: '#9CA3AF' },
+  listSeparator: { height: 1, backgroundColor: '#F3F4F6', marginLeft: 60 },
+
+  // Shared Modal Styles
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor: '#fff' },
   modalCancel: { fontSize: 16, color: '#6B7280' },
   modalTitle: { fontSize: 17, fontWeight: '600' },
@@ -918,11 +1015,4 @@ const styles = StyleSheet.create({
   modalBtnRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   cancelBtn: { flex: 1, padding: 14, alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 10, marginRight: 8 },
   saveBtn: { flex: 1, padding: 14, alignItems: 'center', backgroundColor: theme.colors.primary, borderRadius: 10 },
-  recorderArea: { alignItems: 'center', padding: 24, backgroundColor: '#fff', borderRadius: 20, marginBottom: 20, marginHorizontal: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
-  timerBox: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  timerText: { fontSize: 32, fontWeight: '200', color: '#333', fontVariant: ['tabular-nums'] },
-  redDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: theme.colors.danger, marginLeft: 8 },
-  recordBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: theme.colors.primary, shadowOpacity: 0.4, shadowRadius: 8, elevation: 4 },
-  recordBtnActive: { backgroundColor: theme.colors.danger, transform: [{scale: 1.1}] },
-  recordLabel: { marginTop: 12, color: '#6B7280', fontSize: 13, fontWeight: '500' },
 });
