@@ -45,7 +45,8 @@
           }
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-share-intent"
     ],
     "experiments": {
       "typedRoutes": true,
