@@ -1,50 +1,166 @@
-# Welcome to your Expo app 👋
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+# 🚀 DUPER
 
-## Get started
+**Duper** is an all-in-one personal productivity dashboard built with **React Native** and **Expo**. It combines task planning, financial tracking, habit streaks, and environment monitoring into a single, cohesive, and aesthetically pleasing interface.
 
-1. Install dependencies
+> **Philosophy:** Your life shouldn't require five different apps. Duper brings your Calendar, Wallet, Notes, and Environment together.
 
-   ```bash
-   npm install
-   ```
+-----
 
-2. Start the app
+## ✨ Key Features
 
-   ```bash
-   npx expo start
-   ```
+### 🏠 **Smart Dashboard**
 
-In the output, you'll find options to open the app in a
+  * **"At a Glance" Super Card:** A unified view showing real-time Weather, Date, Air Quality Index (AQI), and Network Latency (Ping).
+  * **Focus of the Day:** A persistent pinned note to keep your main daily goal front and center.
+  * **Activity Streak:** A GitHub-style contribution graph that visualizes your productivity over the last 14 days.
+  * **Up Next:** Smart logic that shows only future tasks for the current day.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+### 📅 **Planner**
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+  * **Recurring Tasks:** Support for Daily, Weekly, Monthly, and Yearly repeating tasks.
+  * **Smart Completion:** Mark specific instances of repeating tasks as done without breaking the schedule.
+  * **Conflict Free:** Visual indicators for overlapping schedules.
 
-## Get a fresh project
+### 💰 **Wallet (Expenses)**
 
-When you're ready, run:
+  * **Transaction Tracking:** Log Credits and Debits easily.
+  * **JSON-Based Storage:** Data is stored locally on the device for maximum privacy.
+  * **Visual History:** Clean list of recent transactions.
+
+### 📝 **Notes (Coming Soon)**
+
+  * **Quick Capture:** Jot down ideas instantly.
+  * **Categories:** Organize thoughts by tag or project.
+
+-----
+
+## 🛠 Tech Stack
+
+  * **Framework:** [React Native](https://reactnative.dev/) (via [Expo](https://expo.dev/))
+  * **Routing:** [Expo Router](https://docs.expo.dev/router/introduction/) (File-based routing)
+  * **Language:** TypeScript / JavaScript
+  * **Storage:**
+      * `AsyncStorage`: For lightweight settings and flags.
+      * `expo-file-system`: For robust JSON-based data persistence (Expenses/Tasks).
+  * **APIs:**
+      * [Open-Meteo](https://open-meteo.com/): For Weather and AQI data (No API Key required).
+      * `expo-network`: For real-time connectivity status.
+      * `expo-location`: For localized weather data.
+  * **Icons:** Ionicons (`@expo/vector-icons`).
+
+-----
+
+## 📂 Project Structure
 
 ```bash
-npm run reset-project
+Duper/
+├── app/                    # Expo Router Screens
+│   ├── index.tsx           # Home Dashboard
+│   ├── planner.tsx         # Task Manager
+│   ├── expenses.tsx        # Wallet/Transactions
+│   ├── notes.tsx           # Notes App
+│   └── _layout.tsx         # Navigation Configuration
+├── assets/
+│   └── images/             # App Icons and Logos
+├── src/
+│   ├── components/         # Reusable UI Components
+│   │   └── BouncyCard.tsx  # Animated Card Component
+│   └── context/
+│       └── AppDataContext.tsx # Global State (Profile, etc.)
+└── package.json
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+-----
 
-## Learn more
+## 🚀 Getting Started
 
-To learn more about developing your project with Expo, look at the following resources:
+Follow these steps to run Duper locally on your machine.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### Prerequisites
 
-## Join the community
+  * Node.js (LTS version recommended)
+  * Expo Go app installed on your physical device (Android/iOS) OR an Emulator/Simulator.
 
-Join our community of developers creating universal apps.
+### Installation
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+1.  **Clone the repository**
+
+    ```bash
+    git clone https://github.com/yourusername/duper.git
+    cd duper
+    ```
+
+2.  **Install dependencies**
+
+    ```bash
+    npm install
+    # or
+    yarn install
+    ```
+
+3.  **Start the app**
+
+    ```bash
+    npx expo start
+    ```
+
+4.  **Run on Device**
+
+      * Scan the QR code displayed in the terminal using the **Expo Go** app on your phone.
+      * Press `a` to run on Android Emulator.
+      * Press `i` to run on iOS Simulator.
+
+-----
+
+## 💾 Data & Privacy
+
+**Duper is Local-First.**
+We do not store your data on any cloud server.
+
+  * **Profile Data:** Stored in `AsyncStorage`.
+  * **Tasks & Expenses:** Stored in JSON files within the app's document directory.
+  * **Backup:** To backup your data, you can export the generated JSON files (Feature coming in v1.1).
+
+-----
+
+## 🎨 Customization
+
+### Theming
+
+The app uses a centralized `THEME` object located in `app/index.tsx` (and shared files). You can easily customize the color palette:
+
+```javascript
+const THEME = {
+  bg: '#F3F4F6',
+  accentBlue: '#2563EB',
+  textMain: '#111827',
+  // ...
+};
+```
+
+### Changing the Logo
+
+Replace the file at `assets/images/android-icon-foreground.png` with your own PNG logo to update the branding in the header.
+
+-----
+
+## 🤝 Contributing
+
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+
+1.  Fork the Project
+2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4.  Push to the Branch (`git push origin feature/AmazingFeature`)
+5.  Open a Pull Request
+
+-----
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+-----
+
+**Duper** — Organize your life, simply.
