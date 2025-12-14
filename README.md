@@ -1,5 +1,6 @@
 
 # 🚀 DUPER
+https://expo.dev/accounts/dhiraj7kr/projects/duper-productivity/builds/df7fefa1-bce2-49ed-bef4-7991bd4978ac
 
 **Duper** is an all-in-one personal productivity dashboard built with **React Native** and **Expo**. It combines task planning, financial tracking, habit streaks, and environment monitoring into a single, cohesive, and aesthetically pleasing interface.
 
