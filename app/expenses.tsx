@@ -39,7 +39,7 @@ type Transaction = {
   paymentMethod: PaymentMethod;
   date: string; // ISO String
   note?: string;
-  isArchived?: boolean; // New Field
+  isArchived?: boolean;
 };
 
 type ExpenseDataStore = {
@@ -48,20 +48,18 @@ type ExpenseDataStore = {
   monthlyBudget: number;
 };
 
-// FIX: Ignore TS check for documentDirectory
+// --- PERSISTENCE CONFIGURATION ---
 // @ts-ignore
-const docDir = FileSystem.documentDirectory || '';
-const DATA_FILE = docDir + 'app_data_expenses_v5.json';
+const DOC_DIR = FileSystem.documentDirectory || '';
+const DATA_FILE = DOC_DIR + 'expenses_data_store.json';
 
 const INCOME_CATEGORIES = ['Salary', 'Freelance', 'Business', 'Investment', 'Gift', 'General'];
 const EXPENSE_CATEGORIES = ['Food', 'Transport', 'Rent', 'Shopping', 'Health', 'Bills', 'Entertainment', 'General'];
 
 const CATEGORY_COLORS: Record<string, string> = {
-  // Expenses
   'Food': '#F87171', 'Transport': '#60A5FA', 'Rent': '#818CF8', 
   'Shopping': '#F472B6', 'Health': '#34D399', 'Bills': '#FBBF24', 
   'Entertainment': '#A78BFA', 'General': '#9CA3AF',
-  // Income
   'Salary': '#34D399', 'Freelance': '#60A5FA', 'Business': '#FBBF24',
   'Investment': '#818CF8', 'Gift': '#F472B6'
 };
@@ -79,35 +77,38 @@ const formatDate = (isoString: string) => {
   return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-// --- FIX: Added utf8 encoding and error handling ---
-const saveToJSON = async (data: ExpenseDataStore) => {
-  if (!docDir) return;
+// --- STORAGE HELPERS ---
+
+const saveData = async (data: ExpenseDataStore) => {
+  if (!DOC_DIR) return;
   try {
-    await FileSystem.writeAsStringAsync(DATA_FILE, JSON.stringify(data), { encoding: 'utf8' });
+    await FileSystem.writeAsStringAsync(DATA_FILE, JSON.stringify(data));
+    // console.log('Data saved successfully');
   } catch (error) {
     console.error('Error saving expenses:', error);
   }
 };
 
-// --- FIX: Safety Merge to prevent data loss on load ---
-const loadFromJSON = async (): Promise<ExpenseDataStore> => {
-  if (!docDir) return { transactions: [], currencySymbol: '₹', monthlyBudget: 10000 };
+const loadData = async (): Promise<ExpenseDataStore> => {
+  const defaultData: ExpenseDataStore = { transactions: [], currencySymbol: '₹', monthlyBudget: 10000 };
+  
+  if (!DOC_DIR) return defaultData;
+  
   try {
     const info = await FileSystem.getInfoAsync(DATA_FILE);
-    if (!info.exists) return { transactions: [], currencySymbol: '₹', monthlyBudget: 10000 };
+    if (!info.exists) return defaultData;
     
-    const content = await FileSystem.readAsStringAsync(DATA_FILE, { encoding: 'utf8' });
+    const content = await FileSystem.readAsStringAsync(DATA_FILE);
     const parsed = JSON.parse(content);
 
-    // Ensure structure exists even if file is partial
     return {
-        transactions: parsed.transactions || [],
-        currencySymbol: parsed.currencySymbol || '₹',
-        monthlyBudget: parsed.monthlyBudget || 10000
+       transactions: parsed.transactions || [],
+       currencySymbol: parsed.currencySymbol || '₹',
+       monthlyBudget: parsed.monthlyBudget || 10000
     };
   } catch (error) {
     console.log('Load Error', error);
-    return { transactions: [], currencySymbol: '₹', monthlyBudget: 10000 };
+    return defaultData;
   }
 };
 
@@ -120,22 +121,23 @@ export default function ExpensesScreen() {
   const [data, setData] = useState<ExpenseDataStore>({ transactions: [], currencySymbol: '₹', monthlyBudget: 10000 });
   const [loading, setLoading] = useState(true);
 
-  // --- FIX: Mounted check to prevent race conditions ---
+  // --- 1. LOAD ON STARTUP ---
   useEffect(() => {
     let isMounted = true;
-    loadFromJSON().then((d) => {
+    loadData().then((d) => {
       if (isMounted) {
         setData(d);
-        setLoading(false);
+        setLoading(false); // Only allow saving AFTER loading is done
       }
     });
     return () => { isMounted = false; };
   }, []);
 
-  // --- FIX: Only save if NOT loading ---
+  // --- 2. AUTO-SAVE WHEN DATA CHANGES ---
   useEffect(() => {
+    // CRITICAL: Do not save if we are still loading!
     if (!loading) {
-        saveToJSON(data);
+        saveData(data);
     }
   }, [data, loading]);
 
@@ -176,6 +178,14 @@ export default function ExpensesScreen() {
       }
     } catch (e) { Alert.alert('Error', 'Import failed'); }
   };
+
+  if (loading) {
+    return (
+        <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+            <Text style={{color: '#666'}}>Loading Finances...</Text>
+        </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -328,7 +338,7 @@ const HistoryTab = ({ transactions, onDelete, onArchive, onImport }: any) => {
 
   const exportFile = async (format: 'csv' | 'json') => {
     try {
-      if (!docDir) {
+      if (!DOC_DIR) {
         Alert.alert('Error', 'Device storage is not accessible.');
         return;
       }
@@ -345,7 +355,7 @@ const HistoryTab = ({ transactions, onDelete, onArchive, onImport }: any) => {
         });
       }
 
-      const uri = docDir + fileName;
+      const uri = DOC_DIR + fileName;
       await FileSystem.writeAsStringAsync(uri, content, {
         encoding: 'utf8' 
       });
@@ -482,18 +492,18 @@ const SimplePieChart = ({ data }: { data: any[] }) => {
   return (
     <View style={{ height: 200, width: 200, position: 'relative', alignItems: 'center', justifyContent: 'center' }}>
        {data.map((item, index) => (
-          <View 
-            key={index} 
-            style={{
-              position: 'absolute',
-              width: 200 - (index * 25),
-              height: 200 - (index * 25),
-              borderRadius: 100,
-              borderWidth: 10,
-              borderColor: item.color,
-              opacity: 1
-            }} 
-          />
+         <View 
+           key={index} 
+           style={{
+             position: 'absolute',
+             width: 200 - (index * 25),
+             height: 200 - (index * 25),
+             borderRadius: 100,
+             borderWidth: 10,
+             borderColor: item.color,
+             opacity: 1
+           }} 
+         />
        ))}
     </View>
   );

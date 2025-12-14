@@ -323,15 +323,30 @@ const HomeScreen: React.FC = () => {
       try { await AsyncStorage.setItem(WATER_KEY, JSON.stringify(data)); } catch(e) {}
   };
 
+  // --- UPDATED INTERVAL LOGIC ---
   useEffect(() => {
+    // Initial Load
     fetchEnvironment();
     loadData();
+
     const interval = setInterval(() => {
         const current = new Date();
-        setNow(current);
-        if (current.getSeconds() === 0) loadData();
-        if (current.getMinutes() % 15 === 0) fetchEnvironment();
+        setNow(current); // Update Clock UI every second
+
+        // Execute logic only at the start of a minute (Seconds == 0)
+        if (current.getSeconds() === 0) {
+            
+            // 1. Update Task List (Every Minute)
+            loadData();
+            
+            // 2. Update Environment/Network (Every 5 Minutes)
+            // Checks if current minute is 0, 5, 10, 15, etc.
+            if (current.getMinutes() % 5 === 0) {
+                fetchEnvironment();
+            }
+        }
     }, 1000);
+
     return () => clearInterval(interval);
   }, []);
 
