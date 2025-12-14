@@ -34,7 +34,6 @@
     "expo-location": "~19.0.8",
     "expo-network": "~8.0.8",
     "expo-notifications": "~0.32.15",
-    "expo-permissions": "^14.4.0",
     "expo-print": "~15.0.8",
     "expo-router": "~6.0.19",
     "expo-sensors": "~15.0.8",

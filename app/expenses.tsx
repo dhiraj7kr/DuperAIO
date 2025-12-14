@@ -4,23 +4,21 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    FlatList,
-    KeyboardAvoidingView,
-    Modal,
-    PanResponder,
-    Platform,
-    // SafeAreaView, // REMOVED from here
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert,
+  Animated,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  PanResponder,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
-// ADDED THIS IMPORT
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { theme } from '../src/theme/theme';
@@ -81,23 +79,34 @@ const formatDate = (isoString: string) => {
   return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
+// --- FIX: Added utf8 encoding and error handling ---
 const saveToJSON = async (data: ExpenseDataStore) => {
   if (!docDir) return;
   try {
-    await FileSystem.writeAsStringAsync(DATA_FILE, JSON.stringify(data));
+    await FileSystem.writeAsStringAsync(DATA_FILE, JSON.stringify(data), { encoding: 'utf8' });
   } catch (error) {
     console.error('Error saving expenses:', error);
   }
 };
 
+// --- FIX: Safety Merge to prevent data loss on load ---
 const loadFromJSON = async (): Promise<ExpenseDataStore> => {
   if (!docDir) return { transactions: [], currencySymbol: '₹', monthlyBudget: 10000 };
   try {
     const info = await FileSystem.getInfoAsync(DATA_FILE);
     if (!info.exists) return { transactions: [], currencySymbol: '₹', monthlyBudget: 10000 };
-    const content = await FileSystem.readAsStringAsync(DATA_FILE);
-    return JSON.parse(content);
+    
+    const content = await FileSystem.readAsStringAsync(DATA_FILE, { encoding: 'utf8' });
+    const parsed = JSON.parse(content);
+
+    // Ensure structure exists even if file is partial
+    return {
+        transactions: parsed.transactions || [],
+        currencySymbol: parsed.currencySymbol || '₹',
+        monthlyBudget: parsed.monthlyBudget || 10000
+    };
   } catch (error) {
+    console.log('Load Error', error);
     return { transactions: [], currencySymbol: '₹', monthlyBudget: 10000 };
   }
 };
@@ -111,15 +120,23 @@ export default function ExpensesScreen() {
   const [data, setData] = useState<ExpenseDataStore>({ transactions: [], currencySymbol: '₹', monthlyBudget: 10000 });
   const [loading, setLoading] = useState(true);
 
+  // --- FIX: Mounted check to prevent race conditions ---
   useEffect(() => {
+    let isMounted = true;
     loadFromJSON().then((d) => {
-      setData(d);
-      setLoading(false);
+      if (isMounted) {
+        setData(d);
+        setLoading(false);
+      }
     });
+    return () => { isMounted = false; };
   }, []);
 
+  // --- FIX: Only save if NOT loading ---
   useEffect(() => {
-    if (!loading) saveToJSON(data);
+    if (!loading) {
+        saveToJSON(data);
+    }
   }, [data, loading]);
 
   const addTransaction = (t: Transaction) => {
@@ -329,7 +346,6 @@ const HistoryTab = ({ transactions, onDelete, onArchive, onImport }: any) => {
       }
 
       const uri = docDir + fileName;
-      // FIX: Use string literal 'utf8'
       await FileSystem.writeAsStringAsync(uri, content, {
         encoding: 'utf8' 
       });
@@ -665,18 +681,18 @@ const AddTransactionModal = ({ visible, onClose, onSave }: any) => {
           </View>
 
           <View style={styles.inputGroup}>
-             <View style={styles.rowBetween}>
-               <Text style={styles.label}>Date</Text>
-               <TouchableOpacity onPress={() => setShowDatePicker(!showDatePicker)}>
-                  <Text style={{color: theme.colors.primary}}>{showDatePicker ? 'Use Today' : 'Change Date'}</Text>
-               </TouchableOpacity>
-             </View>
-             {!showDatePicker ? <Text style={styles.dateDisplay}>{date.toDateString()}</Text> : <TextInput style={styles.textInput} placeholder="YYYY-MM-DD" value={dateText} onChangeText={setDateText} />}
+              <View style={styles.rowBetween}>
+                <Text style={styles.label}>Date</Text>
+                <TouchableOpacity onPress={() => setShowDatePicker(!showDatePicker)}>
+                   <Text style={{color: theme.colors.primary}}>{showDatePicker ? 'Use Today' : 'Change Date'}</Text>
+                </TouchableOpacity>
+              </View>
+              {!showDatePicker ? <Text style={styles.dateDisplay}>{date.toDateString()}</Text> : <TextInput style={styles.textInput} placeholder="YYYY-MM-DD" value={dateText} onChangeText={setDateText} />}
           </View>
 
           <View style={{height: 40}} />
           <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-             <Text style={styles.saveButtonText}>Save Transaction</Text>
+              <Text style={styles.saveButtonText}>Save Transaction</Text>
           </TouchableOpacity>
           <View style={{height: 60}} />
         </ScrollView>

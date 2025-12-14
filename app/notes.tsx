@@ -91,8 +91,6 @@ const formatDateTime = (isoString: string) => {
 // Calculates the next date based on recurrence type
 const calculateNextOccurrence = (currentDateStr: string, type: RecurrenceType): string => {
   const d = new Date(currentDateStr);
-  // If the date is in the past, reset it to today before adding interval? 
-  // For now, we strictly add the interval to the existing date to keep the cycle.
   if (type === 'daily') d.setDate(d.getDate() + 1);
   if (type === 'weekly') d.setDate(d.getDate() + 7);
   if (type === 'monthly') d.setMonth(d.getMonth() + 1);
@@ -100,6 +98,31 @@ const calculateNextOccurrence = (currentDateStr: string, type: RecurrenceType): 
   return d.toISOString();
 };
 
+// --- PERSISTENCE HELPERS ---
+
+// 1. Move voice note files to permanent storage
+const moveFileToPermanentStorage = async (tempUri: string): Promise<string> => {
+  try {
+    const fileName = tempUri.split('/').pop();
+    // @ts-ignore
+    const newPath = FileSystem.documentDirectory + fileName;
+    
+    // Check if file exists to prevent errors
+    const fileInfo = await FileSystem.getInfoAsync(newPath);
+    if (!fileInfo.exists) {
+        await FileSystem.moveAsync({
+            from: tempUri,
+            to: newPath
+        });
+    }
+    return newPath;
+  } catch (error) {
+    console.log('Error moving file:', error);
+    return tempUri; // Fallback
+  }
+};
+
+// 2. Save entire state (Notes + Links + Voice Metadata) to JSON
 const saveToJSON = async (data: AppDataStore) => {
   if (!docDir) return;
   try {
@@ -109,14 +132,24 @@ const saveToJSON = async (data: AppDataStore) => {
   }
 };
 
+// 3. Load with safety check to prevent overwriting with empty data
 const loadFromJSON = async (): Promise<AppDataStore> => {
   if (!docDir) return { notes: [], links: [], voiceNotes: [] };
   try {
     const info = await FileSystem.getInfoAsync(DATA_FILE_URI);
     if (!info.exists) return { notes: [], links: [], voiceNotes: [] };
+    
     const content = await FileSystem.readAsStringAsync(DATA_FILE_URI, { encoding: 'utf8' });
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    
+    // SAFETY MERGE: Ensure all arrays exist even if file is old
+    return {
+        notes: parsed.notes || [],
+        links: parsed.links || [],
+        voiceNotes: parsed.voiceNotes || []
+    };
   } catch (error) {
+    console.log('Load Error:', error);
     return { notes: [], links: [], voiceNotes: [] };
   }
 };
@@ -134,6 +167,7 @@ export default function NotesScreen() {
   const [activeRecording, setActiveRecording] = useState<Audio.Recording | null>(null);
   const [recordingTimer, setRecordingTimer] = useState(0);
 
+  // --- INIT LOAD ---
   useEffect(() => {
     loadFromJSON().then((loadedData) => {
       setData(loadedData);
@@ -141,8 +175,12 @@ export default function NotesScreen() {
     });
   }, []);
 
+  // --- AUTO SAVE ON CHANGE ---
   useEffect(() => {
-    if (!loading) saveToJSON(data);
+    // Only save if we are NOT loading. This prevents overwriting data with empty state on startup.
+    if (!loading) {
+        saveToJSON(data);
+    }
   }, [data, loading]);
 
   // --- RECORDING FUNCTIONS ---
@@ -317,8 +355,7 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
     setModalVisible(false);
   };
 
-  // 2. COMPLETE / DELETE LOGIC (FIXED)
-  
+  // 2. COMPLETE / DELETE LOGIC
   const performAction = (action: 'complete' | 'delete', note: Note) => {
     const isRecurring = note.recurrence && note.recurrence !== 'none';
     const actionLabel = action === 'complete' ? 'Complete' : 'Delete';
@@ -342,14 +379,12 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
                     text: `${actionLabel} All Future`, 
                     style: 'destructive',
                     onPress: () => {
-                        // Remove entirely
                         setNotes(notes.filter(n => n.id !== note.id));
                     }
                 }
             ]
         );
     } else {
-        // Normal Note
         Alert.alert(
             actionLabel,
             `Are you sure you want to ${actionLabel.toLowerCase()} this note?`,
@@ -394,7 +429,7 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
         renderItem={({ item }) => (
           <SwipeableItem 
-            onSwipeRight={() => performAction('delete', item)} // Trigger delete logic on swipe
+            onSwipeRight={() => performAction('delete', item)}
             onSwipeLeft={() => handleNotePress(item)}
             onPress={() => handleNotePress(item)}
           >
@@ -415,16 +450,14 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
                 </Text>
                 <View style={styles.noteCardFooter}>
                   <Text style={styles.noteDate}>
-                     {item.recurrence && item.recurrence !== 'none' ? `${item.recurrence} • ` : ''} 
-                     {formatDateTime(item.createdAt)}
+                      {item.recurrence && item.recurrence !== 'none' ? `${item.recurrence} • ` : ''} 
+                      {formatDateTime(item.createdAt)}
                   </Text>
                   
                   <View style={styles.row}>
-                      {/* Complete Button - Triggers Complete Logic */}
                       <TouchableOpacity onPress={() => performAction('complete', item)} style={{ padding: 4, marginRight: 8 }}>
                           <Ionicons name="checkmark-circle-outline" size={22} color={theme.colors.primary} />
                       </TouchableOpacity>
-                      
                       <TouchableOpacity onPress={() => shareNote(item)} style={{ padding: 4 }}>
                           <Ionicons name="share-social-outline" size={18} color={theme.colors.primary} />
                       </TouchableOpacity>
@@ -439,49 +472,49 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         <Ionicons name="add" size={32} color="#FFF" />
       </TouchableOpacity>
 
-      {/* Editor Modal */}
+      {/* Editor Modal - SAFE AREA FIXED */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setModalVisible(false)}><Text style={styles.modalCancel}>Cancel</Text></TouchableOpacity>
-            <Text style={styles.modalTitle}>{editingId ? 'Edit Note' : 'New Note'}</Text>
-            <TouchableOpacity onPress={saveNote}><Text style={styles.modalSave}>Done</Text></TouchableOpacity>
-          </View>
-          <ScrollView style={styles.editorContainer}>
-             <TextInput style={styles.editorTitle} placeholder="Title" value={title} onChangeText={setTitle} placeholderTextColor="#999"/>
-             
-             {/* Recurrence Selection */}
-             <TouchableOpacity onPress={toggleRecurrence} style={styles.recurrenceSelector}>
-                <View style={styles.row}>
-                    <MaterialCommunityIcons name="calendar-refresh" size={20} color={recurrence !== 'none' ? theme.colors.primary : '#999'} />
-                    <Text style={[styles.lockLabel, { marginLeft: 8 }]}>Repeat Task</Text>
-                </View>
-                <Text style={{ color: recurrence !== 'none' ? theme.colors.primary : '#999', fontWeight: '600', textTransform: 'capitalize' }}>
-                    {recurrence === 'none' ? 'Never' : recurrence}
-                </Text>
-             </TouchableOpacity>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}> 
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+            <View style={styles.modalHeader}>
+                <TouchableOpacity onPress={() => setModalVisible(false)}><Text style={styles.modalCancel}>Cancel</Text></TouchableOpacity>
+                <Text style={styles.modalTitle}>{editingId ? 'Edit Note' : 'New Note'}</Text>
+                <TouchableOpacity onPress={saveNote}><Text style={styles.modalSave}>Done</Text></TouchableOpacity>
+            </View>
+            <ScrollView style={styles.editorContainer}>
+                <TextInput style={styles.editorTitle} placeholder="Title" value={title} onChangeText={setTitle} placeholderTextColor="#999"/>
+                
+                <TouchableOpacity onPress={toggleRecurrence} style={styles.recurrenceSelector}>
+                    <View style={styles.row}>
+                        <MaterialCommunityIcons name="calendar-refresh" size={20} color={recurrence !== 'none' ? theme.colors.primary : '#999'} />
+                        <Text style={[styles.lockLabel, { marginLeft: 8 }]}>Repeat Task</Text>
+                    </View>
+                    <Text style={{ color: recurrence !== 'none' ? theme.colors.primary : '#999', fontWeight: '600', textTransform: 'capitalize' }}>
+                        {recurrence === 'none' ? 'Never' : recurrence}
+                    </Text>
+                </TouchableOpacity>
 
-             <View style={styles.lockToggleRow}>
-               <View style={styles.row}>
-                 <Ionicons name={isLocked ? "lock-closed" : "lock-open-outline"} size={20} color={isLocked ? theme.colors.primary : '#999'} />
-                 <Text style={styles.lockLabel}> Password Protect</Text>
-               </View>
-               <Switch value={isLocked} onValueChange={setIsLocked} trackColor={{true: theme.colors.primary}} />
-             </View>
-             {isLocked && <TextInput style={styles.pinInput} placeholder="Enter 4-digit PIN" value={pin} onChangeText={t => { if(t.length <= 4) setPin(t.replace(/[^0-9]/g, '')) }} keyboardType="numeric" secureTextEntry />}
-             <TextInput ref={contentInputRef} style={styles.editorContent} placeholder="Start typing..." value={content} onChangeText={setContent} multiline textAlignVertical="top" placeholderTextColor="#ccc"/>
-             <View style={{height: 60}} />
-          </ScrollView>
-          <View style={styles.toolbar}>
-            <TouchableOpacity onPress={() => insertText('\n• ')} style={styles.toolBtn}><MaterialCommunityIcons name="format-list-bulleted" size={24} color="#333" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => insertText('\n☐ ')} style={styles.toolBtn}><MaterialCommunityIcons name="checkbox-blank-outline" size={24} color="#333" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => insertText(`\n___\n`)} style={styles.toolBtn}><MaterialCommunityIcons name="minus" size={24} color="#333" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => Keyboard.dismiss()} style={[styles.toolBtn, { marginLeft: 'auto' }]}><Ionicons name="chevron-down" size={24} color="#333" /></TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
+                <View style={styles.lockToggleRow}>
+                    <View style={styles.row}>
+                    <Ionicons name={isLocked ? "lock-closed" : "lock-open-outline"} size={20} color={isLocked ? theme.colors.primary : '#999'} />
+                    <Text style={styles.lockLabel}> Password Protect</Text>
+                    </View>
+                    <Switch value={isLocked} onValueChange={setIsLocked} trackColor={{true: theme.colors.primary}} />
+                </View>
+                {isLocked && <TextInput style={styles.pinInput} placeholder="Enter 4-digit PIN" value={pin} onChangeText={t => { if(t.length <= 4) setPin(t.replace(/[^0-9]/g, '')) }} keyboardType="numeric" secureTextEntry />}
+                <TextInput ref={contentInputRef} style={styles.editorContent} placeholder="Start typing..." value={content} onChangeText={setContent} multiline textAlignVertical="top" placeholderTextColor="#ccc"/>
+                <View style={{height: 60}} />
+            </ScrollView>
+            <View style={styles.toolbar}>
+                <TouchableOpacity onPress={() => insertText('\n• ')} style={styles.toolBtn}><MaterialCommunityIcons name="format-list-bulleted" size={24} color="#333" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => insertText('\n☐ ')} style={styles.toolBtn}><MaterialCommunityIcons name="checkbox-blank-outline" size={24} color="#333" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => insertText(`\n___\n`)} style={styles.toolBtn}><MaterialCommunityIcons name="minus" size={24} color="#333" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => Keyboard.dismiss()} style={[styles.toolBtn, { marginLeft: 'auto' }]}><Ionicons name="chevron-down" size={24} color="#333" /></TouchableOpacity>
+            </View>
+            </KeyboardAvoidingView>
+        </SafeAreaView>
       </Modal>
 
-      {/* Lock Auth Modal */}
       <Modal visible={authVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
            <View style={styles.miniModal}>
@@ -499,7 +532,7 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
 };
 
 // ==========================================
-// 5. TAB 2: READ LATER (UNCHANGED)
+// 5. TAB 2: READ LATER
 // ==========================================
 
 const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: LinkItem[]) => void }) => {
@@ -584,7 +617,7 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
 };
 
 // ==========================================
-// 6. TAB 3: VOICE NOTES (UNCHANGED)
+// 6. TAB 3: VOICE NOTES (FIXED PERSISTENCE)
 // ==========================================
 
 const VoiceTab = ({ voiceNotes, setVoiceNotes, activeRecording, activeTimer, onStartRecording, onStopRecording, onResetTimer }: any) => {
@@ -633,10 +666,13 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes, activeRecording, activeTimer, onS
     if (uri) { setTempUri(uri); setSaveName(`Voice Memo ${voiceNotes.length + 1}`); setSaveLocked(false); setSavePin(''); setSaveModalVisible(true); }
   };
 
-  const finalizeSave = () => {
+  const finalizeSave = async () => {
     if (saveLocked && (savePin.length !== 4 || isNaN(Number(savePin)))) { Alert.alert('Invalid PIN', 'Please enter 4 digits.'); return; }
+    
     if(tempUri) {
-      const note: VoiceNote = { id: Date.now().toString(), uri: tempUri, name: saveName, createdAt: new Date().toISOString(), durationSeconds: activeTimer, isLocked: saveLocked, password: saveLocked ? savePin : undefined };
+      // --- FIX: Move file to permanent storage ---
+      const permanentUri = await moveFileToPermanentStorage(tempUri);
+      const note: VoiceNote = { id: Date.now().toString(), uri: permanentUri, name: saveName, createdAt: new Date().toISOString(), durationSeconds: activeTimer, isLocked: saveLocked, password: saveLocked ? savePin : undefined };
       setVoiceNotes([note, ...voiceNotes]);
     }
     setSaveModalVisible(false); onResetTimer(); 

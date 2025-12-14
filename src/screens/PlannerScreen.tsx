@@ -17,6 +17,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context'; // <--- ADDED IMPORT
 import {
   AlarmLeadMinutes,
   AlarmMode,
@@ -46,7 +47,7 @@ interface Task {
   link?: string;
   associated?: string;
   isCompleted: boolean;
-  completedExceptions?: string[]; // <--- ADDED: To track completion of specific repeating instances
+  completedExceptions?: string[]; 
   repeat: RepeatRule;
   type: TaskType;
   createdAt: string;
@@ -92,7 +93,7 @@ const SwipeableTask = ({
           // Swiped Right -> Delete
           Animated.spring(pan, { toValue: { x: SCREEN_WIDTH, y: 0 }, useNativeDriver: false }).start(() => {
             onSwipeRight();
-            pan.setValue({ x: 0, y: 0 }); // Reset for UI consistency if delete is cancelled
+            pan.setValue({ x: 0, y: 0 }); 
           });
         } else if (gestureState.dx < -SWIPE_THRESHOLD) {
           // Swiped Left -> Edit
@@ -108,25 +109,21 @@ const SwipeableTask = ({
     })
   ).current;
 
-  // Background Animations
   const rightOpacity = pan.x.interpolate({ inputRange: [0, SWIPE_THRESHOLD], outputRange: [0, 1] });
   const leftOpacity = pan.x.interpolate({ inputRange: [-SWIPE_THRESHOLD, 0], outputRange: [1, 0] });
 
   return (
     <View style={styles.swipeContainer}>
-      {/* Background Layer (Delete - Red - Right Swipe) */}
       <Animated.View style={[styles.swipeBg, styles.swipeBgDelete, { opacity: rightOpacity }]}>
         <Ionicons name="trash" size={24} color="#fff" />
         <Text style={styles.swipeText}>Delete</Text>
       </Animated.View>
 
-      {/* Background Layer (Edit - Blue - Left Swipe) */}
       <Animated.View style={[styles.swipeBg, styles.swipeBgEdit, { opacity: leftOpacity }]}>
         <Text style={styles.swipeText}>Edit</Text>
         <Ionicons name="create" size={24} color="#fff" />
       </Animated.View>
 
-      {/* Foreground Layer */}
       <Animated.View
         style={[styles.swipeForeground, { transform: [{ translateX: pan.x }] }]}
         {...panResponder.panHandlers}
@@ -208,8 +205,6 @@ const PlannerScreen: React.FC = () => {
     return tasks
       .filter((t) => occursOnDate(t, dateStr))
       .map((t) => {
-        // Handle Repeat Exceptions: If this date is in the exceptions list, 
-        // create a temporary copy that is marked completed for UI purposes.
         if (t.completedExceptions?.includes(dateStr)) {
             return { ...t, isCompleted: true };
         }
@@ -219,7 +214,6 @@ const PlannerScreen: React.FC = () => {
         if (showCompleted) return true;
         if (t.isCompleted) return false;
         
-        // Simple past check
         const taskTime = t.startTime ? new Date(`${dateStr}T${t.startTime}:00`) : toDate(t.date);
         return taskTime >= now || isSameDay(toDate(t.date), now) || t.startTime === undefined;
       })
@@ -317,23 +311,14 @@ const PlannerScreen: React.FC = () => {
     ]);
   };
 
-  // --- NEW: Repeat-Aware Toggle Complete ---
   const toggleComplete = (task: Task) => {
     const todayStr = formatYMD(selectedDate);
-  
-    // 🔹 Non-repeating task → old behavior
     if (task.repeat === 'none') {
       saveTasks(
-        tasks.map((t) =>
-          t.id === task.id
-            ? { ...t, isCompleted: !t.isCompleted }
-            : t
-        )
+        tasks.map((t) => t.id === task.id ? { ...t, isCompleted: !t.isCompleted } : t)
       );
       return;
     }
-  
-    // 🔹 Repeating task → ask user
     Alert.alert(
       'Complete Task',
       'Do you want to complete only this task or all upcoming tasks?',
@@ -343,17 +328,7 @@ const PlannerScreen: React.FC = () => {
           text: 'Only this task',
           onPress: () => {
             saveTasks(
-              tasks.map((t) =>
-                t.id === task.id
-                  ? {
-                      ...t,
-                      completedExceptions: [
-                        ...(t.completedExceptions || []),
-                        todayStr,
-                      ],
-                    }
-                  : t
-              )
+              tasks.map((t) => t.id === task.id ? { ...t, completedExceptions: [...(t.completedExceptions || []), todayStr] } : t)
             );
           },
         },
@@ -362,11 +337,7 @@ const PlannerScreen: React.FC = () => {
           style: 'destructive',
           onPress: () => {
             saveTasks(
-              tasks.map((t) =>
-                t.id === task.id
-                  ? { ...t, isCompleted: true }
-                  : t
-              )
+              tasks.map((t) => t.id === task.id ? { ...t, isCompleted: true } : t)
             );
           },
         },
@@ -374,9 +345,8 @@ const PlannerScreen: React.FC = () => {
     );
   };
 
-  // --- Calendar Layout Calculations ---
   const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
-  const firstDayIndex = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay(); // 0 = Sun
+  const firstDayIndex = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
 
   return (
     <View style={styles.screen}>
@@ -399,7 +369,6 @@ const PlannerScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Calendar Grid */}
         <View style={styles.calendarContainer}>
           <View style={styles.weekRow}>
             {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
@@ -407,11 +376,9 @@ const PlannerScreen: React.FC = () => {
             ))}
           </View>
           <View style={styles.daysGrid}>
-             {/* Empty slots for start of month */}
              {Array.from({ length: firstDayIndex }).map((_, i) => (
                <View key={`empty-${i}`} style={styles.dayCell} />
              ))}
-             {/* Days */}
              {Array.from({ length: daysInMonth }).map((_, i) => {
                const day = i + 1;
                const cellDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
@@ -446,7 +413,6 @@ const PlannerScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Task List Header */}
       <View style={styles.listHeader}>
         <Text style={styles.listDateTitle}>{formatShortDate(selectedDate)}</Text>
         <View style={{flexDirection: 'row'}}>
@@ -472,25 +438,16 @@ const PlannerScreen: React.FC = () => {
               onSwipeLeft={() => openEditModal(task)}
             >
               <View style={styles.taskRow}>
-                {/* Time Column */}
                 <View style={styles.timeCol}>
-                  <Text style={styles.timeText}>
-                    {task.startTime || 'All day'}
-                  </Text>
+                  <Text style={styles.timeText}>{task.startTime || 'All day'}</Text>
                 </View>
-
-                {/* Divider Line */}
                 <View style={[styles.timelineLine, { backgroundColor: task.type === 'event' ? PRIMARY_COLOR : '#E5E5EA' }]} />
-
-                {/* Content */}
                 <TouchableOpacity 
                     style={styles.taskContent} 
                     activeOpacity={0.8}
                     onPress={() => toggleComplete(task)}
                 >
                   <Text style={[styles.taskTitle, task.isCompleted && styles.completedText]}>{task.title}</Text>
-                  
-                  {/* Metadata Row */}
                   {(task.notes || task.reminderLeadMinutes) && (
                       <View style={styles.metaRow}>
                           {task.reminderLeadMinutes ? (
@@ -511,154 +468,152 @@ const PlannerScreen: React.FC = () => {
         )}
       </ScrollView>
 
-      {/* --- MODAL (Apple Style) --- */}
+      {/* --- MODAL (UPDATED WITH SAFE AREA) --- */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{flex: 1, backgroundColor: '#F2F2F7'}}>
-          <View style={styles.modalNav}>
-            <TouchableOpacity onPress={() => setModalVisible(false)}>
-              <Text style={styles.navCancel}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.navTitle}>{editingTask ? 'Edit' : 'New Event'}</Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={styles.navDone}>Done</Text>
-            </TouchableOpacity>
-          </View>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F2F2F7' }}> 
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{flex: 1}}>
+            <View style={styles.modalNav}>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Text style={styles.navCancel}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.navTitle}>{editingTask ? 'Edit' : 'New Event'}</Text>
+              <TouchableOpacity onPress={handleSave}>
+                <Text style={styles.navDone}>Done</Text>
+              </TouchableOpacity>
+            </View>
 
-          <ScrollView style={styles.formScroll}>
-            {/* Group 1: Title & Type */}
-            <View style={styles.formGroup}>
-              <TextInput 
-                style={styles.inputField} 
-                placeholder="Title" 
-                value={title} 
-                onChangeText={setTitle} 
-                placeholderTextColor="#C7C7CC"
-              />
-              <View style={styles.divider} />
-              <View style={styles.rowItem}>
-                 <Text style={styles.rowLabel}>Type</Text>
-                 <View style={styles.segmentContainer}>
-                    {['task', 'event'].map((t) => (
-                        <TouchableOpacity 
-                            key={t} 
-                            style={[styles.segmentBtn, type === t && styles.segmentBtnActive]}
-                            onPress={() => setType(t as TaskType)}
-                        >
-                            <Text style={[styles.segmentText, type === t && styles.segmentTextActive]}>
-                                {t === 'task' ? 'Task' : 'Event'}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                 </View>
+            <ScrollView style={styles.formScroll}>
+              <View style={styles.formGroup}>
+                <TextInput 
+                  style={styles.inputField} 
+                  placeholder="Title" 
+                  value={title} 
+                  onChangeText={setTitle} 
+                  placeholderTextColor="#C7C7CC"
+                />
+                <View style={styles.divider} />
+                <View style={styles.rowItem}>
+                   <Text style={styles.rowLabel}>Type</Text>
+                   <View style={styles.segmentContainer}>
+                      {['task', 'event'].map((t) => (
+                          <TouchableOpacity 
+                              key={t} 
+                              style={[styles.segmentBtn, type === t && styles.segmentBtnActive]}
+                              onPress={() => setType(t as TaskType)}
+                          >
+                              <Text style={[styles.segmentText, type === t && styles.segmentTextActive]}>
+                                  {t === 'task' ? 'Task' : 'Event'}
+                              </Text>
+                          </TouchableOpacity>
+                      ))}
+                   </View>
+                </View>
               </View>
-            </View>
 
-            {/* Group 2: Time */}
-            <View style={styles.formGroup}>
-                <TouchableOpacity style={styles.rowItem} onPress={() => setShowDatePicker(true)}>
-                    <Text style={styles.rowLabel}>Date</Text>
-                    <Text style={styles.rowValue}>{formatShortDate(formDate)}</Text>
-                </TouchableOpacity>
-                <View style={styles.divider} />
-                
-                <View style={styles.rowItem}>
-                    <Text style={styles.rowLabel}>Start</Text>
-                    <TouchableOpacity onPress={() => { setActiveTimeField('start'); setShowTimePicker(true); }}>
-                          <Text style={styles.rowValueTime}>{startTime || 'None'}</Text>
-                    </TouchableOpacity>
-                </View>
-                <View style={styles.divider} />
+              <View style={styles.formGroup}>
+                  <TouchableOpacity style={styles.rowItem} onPress={() => setShowDatePicker(true)}>
+                      <Text style={styles.rowLabel}>Date</Text>
+                      <Text style={styles.rowValue}>{formatShortDate(formDate)}</Text>
+                  </TouchableOpacity>
+                  <View style={styles.divider} />
+                  
+                  <View style={styles.rowItem}>
+                      <Text style={styles.rowLabel}>Start</Text>
+                      <TouchableOpacity onPress={() => { setActiveTimeField('start'); setShowTimePicker(true); }}>
+                            <Text style={styles.rowValueTime}>{startTime || 'None'}</Text>
+                      </TouchableOpacity>
+                  </View>
+                  <View style={styles.divider} />
 
-                <View style={styles.rowItem}>
-                    <Text style={styles.rowLabel}>End</Text>
-                    <TouchableOpacity onPress={() => { setActiveTimeField('end'); setShowTimePicker(true); }}>
-                          <Text style={styles.rowValueTime}>{endTime || 'None'}</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
+                  <View style={styles.rowItem}>
+                      <Text style={styles.rowLabel}>End</Text>
+                      <TouchableOpacity onPress={() => { setActiveTimeField('end'); setShowTimePicker(true); }}>
+                            <Text style={styles.rowValueTime}>{endTime || 'None'}</Text>
+                      </TouchableOpacity>
+                  </View>
+              </View>
 
-            {/* Group 3: Repeat & Alert */}
-            <View style={styles.formGroup}>
-                <View style={styles.rowItem}>
-                    <Text style={styles.rowLabel}>Repeat</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{flexDirection:'row', alignItems:'center'}}>
-                        {['none','daily','weekly','monthly'].map(r => (
-                            <TouchableOpacity key={r} onPress={() => setRepeat(r as RepeatRule)} style={{marginLeft: 8}}>
-                                <Text style={{color: repeat === r ? PRIMARY_COLOR : '#8E8E93', fontSize: 15, textTransform: 'capitalize'}}>
-                                    {r}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </View>
-                <View style={styles.divider} />
-                
-                <View style={styles.rowItem}>
-                    <Text style={styles.rowLabel}>Alert</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                        {[0, 5, 10, 30, 60].map(m => (
-                            <TouchableOpacity key={m} onPress={() => setAlarmLead(m as AlarmLeadMinutes)} style={{marginLeft: 10, backgroundColor: alarmLead === m ? PRIMARY_COLOR : '#E5E5EA', borderRadius: 6, padding: 4}}>
-                                <Text style={{color: alarmLead === m ? '#fff' : '#000', fontSize: 12}}>
-                                    {m === 0 ? 'None' : `${m}m`}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </View>
+              <View style={styles.formGroup}>
+                  <View style={styles.rowItem}>
+                      <Text style={styles.rowLabel}>Repeat</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{flexDirection:'row', alignItems:'center'}}>
+                          {['none','daily','weekly','monthly'].map(r => (
+                              <TouchableOpacity key={r} onPress={() => setRepeat(r as RepeatRule)} style={{marginLeft: 8}}>
+                                  <Text style={{color: repeat === r ? PRIMARY_COLOR : '#8E8E93', fontSize: 15, textTransform: 'capitalize'}}>
+                                      {r}
+                                  </Text>
+                              </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+                  </View>
+                  <View style={styles.divider} />
+                  
+                  <View style={styles.rowItem}>
+                      <Text style={styles.rowLabel}>Alert</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                          {[0, 5, 10, 30, 60].map(m => (
+                              <TouchableOpacity key={m} onPress={() => setAlarmLead(m as AlarmLeadMinutes)} style={{marginLeft: 10, backgroundColor: alarmLead === m ? PRIMARY_COLOR : '#E5E5EA', borderRadius: 6, padding: 4}}>
+                                  <Text style={{color: alarmLead === m ? '#fff' : '#000', fontSize: 12}}>
+                                      {m === 0 ? 'None' : `${m}m`}
+                                  </Text>
+                              </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+                  </View>
 
-                {alarmLead > 0 && (
-                    <>
-                        <View style={styles.divider} />
-                        <View style={styles.rowItem}>
-                            <Text style={styles.rowLabel}>Sound</Text>
-                            <View style={{flexDirection:'row'}}>
-                                {(['sound', 'vibrate', 'silent'] as AlarmMode[]).map(m => (
-                                    <TouchableOpacity key={m} onPress={() => setAlarmMode(m)} style={{marginLeft: 12}}>
-                                        <Ionicons 
-                                            name={m === 'sound' ? 'musical-note' : m === 'vibrate' ? 'phone-portrait' : 'notifications-off'} 
-                                            size={20} 
-                                            color={alarmMode === m ? PRIMARY_COLOR : '#C7C7CC'} 
-                                        />
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        </View>
-                    </>
-                )}
-            </View>
+                  {alarmLead > 0 && (
+                      <>
+                          <View style={styles.divider} />
+                          <View style={styles.rowItem}>
+                              <Text style={styles.rowLabel}>Sound</Text>
+                              <View style={{flexDirection:'row'}}>
+                                  {(['sound', 'vibrate', 'silent'] as AlarmMode[]).map(m => (
+                                      <TouchableOpacity key={m} onPress={() => setAlarmMode(m)} style={{marginLeft: 12}}>
+                                          <Ionicons 
+                                              name={m === 'sound' ? 'musical-note' : m === 'vibrate' ? 'phone-portrait' : 'notifications-off'} 
+                                              size={20} 
+                                              color={alarmMode === m ? PRIMARY_COLOR : '#C7C7CC'} 
+                                          />
+                                      </TouchableOpacity>
+                                  ))}
+                              </View>
+                          </View>
+                      </>
+                  )}
+              </View>
 
-            {/* Group 4: Details */}
-            <View style={styles.formGroup}>
-                <TextInput 
-                    style={[styles.inputField, { height: 80, textAlignVertical: 'top' }]} 
-                    placeholder="Notes" 
-                    value={notes} 
-                    onChangeText={setNotes} 
-                    multiline 
-                    placeholderTextColor="#C7C7CC"
-                />
-                <View style={styles.divider} />
-                <TextInput 
-                    style={styles.inputField} 
-                    placeholder="URL / Link" 
-                    value={link} 
-                    onChangeText={setLink} 
-                    autoCapitalize="none"
-                    placeholderTextColor="#C7C7CC"
-                />
-                <View style={styles.divider} />
-                <TextInput 
-                    style={styles.inputField} 
-                    placeholder="Tag User (Associated)" 
-                    value={associated} 
-                    onChangeText={setAssociated} 
-                    placeholderTextColor="#C7C7CC"
-                />
-            </View>
+              <View style={styles.formGroup}>
+                  <TextInput 
+                      style={[styles.inputField, { height: 80, textAlignVertical: 'top' }]} 
+                      placeholder="Notes" 
+                      value={notes} 
+                      onChangeText={setNotes} 
+                      multiline 
+                      placeholderTextColor="#C7C7CC"
+                  />
+                  <View style={styles.divider} />
+                  <TextInput 
+                      style={styles.inputField} 
+                      placeholder="URL / Link" 
+                      value={link} 
+                      onChangeText={setLink} 
+                      autoCapitalize="none"
+                      placeholderTextColor="#C7C7CC"
+                  />
+                  <View style={styles.divider} />
+                  <TextInput 
+                      style={styles.inputField} 
+                      placeholder="Tag User (Associated)" 
+                      value={associated} 
+                      onChangeText={setAssociated} 
+                      placeholderTextColor="#C7C7CC"
+                  />
+              </View>
 
-            <View style={{height: 100}} />
-          </ScrollView>
-        </KeyboardAvoidingView>
+              <View style={{height: 100}} />
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
 
         {showDatePicker && (
           <DateTimePicker 
