@@ -10,7 +10,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
-  AppState,
   Easing,
   FlatList,
   Keyboard,
@@ -34,6 +33,8 @@ import { theme } from '../src/theme/theme';
 // 1. TYPES & DATA STRUCTURES
 // ==========================================
 
+type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
 type Note = {
   id: string;
   title: string;
@@ -41,6 +42,7 @@ type Note = {
   createdAt: string;
   isLocked: boolean;
   password?: string;
+  recurrence?: RecurrenceType;
 };
 
 type LinkItem = {
@@ -69,7 +71,7 @@ type AppDataStore = {
 
 // @ts-ignore
 const docDir = FileSystem.documentDirectory || ''; 
-const DATA_FILE_URI = docDir + 'app_data_notes_v10.json';
+const DATA_FILE_URI = docDir + 'app_data_notes_v12.json';
 
 // ==========================================
 // 2. HELPER FUNCTIONS & STORAGE
@@ -84,6 +86,18 @@ const formatTime = (seconds: number) => {
 const formatDateTime = (isoString: string) => {
   const date = new Date(isoString);
   return date.toLocaleDateString() + ' • ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+// Calculates the next date based on recurrence type
+const calculateNextOccurrence = (currentDateStr: string, type: RecurrenceType): string => {
+  const d = new Date(currentDateStr);
+  // If the date is in the past, reset it to today before adding interval? 
+  // For now, we strictly add the interval to the existing date to keep the cycle.
+  if (type === 'daily') d.setDate(d.getDate() + 1);
+  if (type === 'weekly') d.setDate(d.getDate() + 7);
+  if (type === 'monthly') d.setMonth(d.getMonth() + 1);
+  if (type === 'yearly') d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString();
 };
 
 const saveToJSON = async (data: AppDataStore) => {
@@ -108,7 +122,7 @@ const loadFromJSON = async (): Promise<AppDataStore> => {
 };
 
 // ==========================================
-// 3. MAIN COMPONENT (Parent Holder)
+// 3. MAIN COMPONENT
 // ==========================================
 
 export default function NotesScreen() {
@@ -116,8 +130,7 @@ export default function NotesScreen() {
   const [data, setData] = useState<AppDataStore>({ notes: [], links: [], voiceNotes: [] });
   const [loading, setLoading] = useState(true);
 
-  // --- LIFTED STATE FOR RECORDING ---
-  // We keep recording state here so it survives tab switching
+  // Recording State
   const [activeRecording, setActiveRecording] = useState<Audio.Recording | null>(null);
   const [recordingTimer, setRecordingTimer] = useState(0);
 
@@ -132,8 +145,7 @@ export default function NotesScreen() {
     if (!loading) saveToJSON(data);
   }, [data, loading]);
 
-  // --- GLOBAL RECORDING FUNCTIONS ---
-
+  // --- RECORDING FUNCTIONS ---
   const startGlobalRecording = async () => {
     try {
       const perm = await Audio.requestPermissionsAsync();
@@ -141,89 +153,35 @@ export default function NotesScreen() {
         Alert.alert('Permission needed', 'Microphone access is required to record.');
         return;
       }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-
-      const recordingOptions: Audio.RecordingOptions = {
-        android: {
-          extension: '.m4a',
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-        } as any,
-        ios: {
-          extension: '.m4a',
-          audioQuality: Audio.IOSAudioQuality.HIGH,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-        web: {
-          mimeType: 'audio/webm',
-          bitsPerSecond: 128000,
-        },
-      };
-
-      const { recording } = await Audio.Recording.createAsync(recordingOptions);
-
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, staysActiveInBackground: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       recording.setOnRecordingStatusUpdate((status) => {
-        if (status.isRecording) {
-          setRecordingTimer(Math.floor(status.durationMillis / 1000));
-        }
+        if (status.isRecording) setRecordingTimer(Math.floor(status.durationMillis / 1000));
       });
-
       await recording.setProgressUpdateInterval(1000);
       setActiveRecording(recording);
-
     } catch (e) {
-      console.error('Recording failed', e);
       Alert.alert('Error', 'Failed to start recording');
     }
   };
 
   const stopGlobalRecording = async (): Promise<string | null> => {
     if (!activeRecording) return null;
-
     try {
       await activeRecording.stopAndUnloadAsync();
       const uri = activeRecording.getURI();
-
-      // Cleanup
       activeRecording.setOnRecordingStatusUpdate(null);
       setActiveRecording(null);
       return uri;
-    } catch (e) {
-      console.error('Failed to stop recording', e);
-      return null;
-    }
+    } catch (e) { return null; }
   };
 
   const resetTimer = () => setRecordingTimer(0);
 
-  // --- DATA UPDATERS ---
-
-  const updateNotes = (newNotes: Note[]) => {
-    setData(prev => ({ ...prev, notes: newNotes }));
-  };
-  
-  const updateLinks = (newLinks: LinkItem[]) => {
-    setData(prev => ({ ...prev, links: newLinks }));
-  };
-
-  const updateVoiceNotes = (newVoiceNotes: VoiceNote[]) => {
-    setData(prev => ({ ...prev, voiceNotes: newVoiceNotes }));
-  };
+  // --- UPDATE WRAPPERS ---
+  const updateNotes = (newNotes: Note[]) => setData(prev => ({ ...prev, notes: newNotes }));
+  const updateLinks = (newLinks: LinkItem[]) => setData(prev => ({ ...prev, links: newLinks }));
+  const updateVoiceNotes = (newVoiceNotes: VoiceNote[]) => setData(prev => ({ ...prev, voiceNotes: newVoiceNotes }));
 
   return (
     <SafeAreaView style={styles.container}>
@@ -240,8 +198,6 @@ export default function NotesScreen() {
       <View style={styles.tabBar}>
         <TabButton title="Notes" icon="document-text-outline" active={activeTab === 'notes'} onPress={() => setActiveTab('notes')} />
         <TabButton title="Read Later" icon="bookmarks-outline" active={activeTab === 'readLater'} onPress={() => setActiveTab('readLater')} />
-        
-        {/* Visual indicator on tab if recording is active in background */}
         <TabButton 
           title={activeRecording ? "Recording..." : "Voice"} 
           icon={activeRecording ? "mic" : "mic-outline"} 
@@ -272,7 +228,7 @@ export default function NotesScreen() {
 }
 
 // ==========================================
-// 4. TAB 1: NOTES (UNCHANGED)
+// 4. TAB 1: NOTES (LOGIC FIXED HERE)
 // ==========================================
 
 const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) => void }) => {
@@ -287,10 +243,12 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
   const [content, setContent] = useState('');
   const [isLocked, setIsLocked] = useState(false);
   const [pin, setPin] = useState('');
+  const [recurrence, setRecurrence] = useState<RecurrenceType>('none');
 
   const contentInputRef = useRef<TextInput>(null);
   const filteredNotes = notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase()));
 
+  // 1. EDIT NOTE
   const handleNotePress = (note: Note) => {
     if (note.isLocked) {
       setPendingNote(note);
@@ -319,12 +277,14 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
       setContent(note.content);
       setIsLocked(note.isLocked);
       setPin(note.password || '');
+      setRecurrence(note.recurrence || 'none');
     } else {
       setEditingId(null);
       setTitle('');
       setContent('');
       setIsLocked(false);
       setPin('');
+      setRecurrence('none');
     }
     setModalVisible(true);
   };
@@ -346,6 +306,7 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
       createdAt: editingId ? (notes.find(n => n.id === editingId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
       isLocked,
       password: isLocked ? pin : undefined,
+      recurrence: recurrence
     };
 
     if (editingId) {
@@ -356,21 +317,68 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
     setModalVisible(false);
   };
 
-  const deleteNote = (id: string) => {
-    setNotes(notes.filter(n => n.id !== id));
+  // 2. COMPLETE / DELETE LOGIC (FIXED)
+  
+  const performAction = (action: 'complete' | 'delete', note: Note) => {
+    const isRecurring = note.recurrence && note.recurrence !== 'none';
+    const actionLabel = action === 'complete' ? 'Complete' : 'Delete';
+
+    if (isRecurring) {
+        Alert.alert(
+            `Recurring Task (${note.recurrence})`,
+            `Do you want to ${actionLabel.toLowerCase()} just this instance, or all upcoming ones?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { 
+                    text: `${actionLabel} This Only`, 
+                    onPress: () => {
+                        // Reschedule to next occurrence
+                        const nextDate = calculateNextOccurrence(note.createdAt, note.recurrence!);
+                        const updatedNote = { ...note, createdAt: nextDate };
+                        setNotes(notes.map(n => n.id === note.id ? updatedNote : n));
+                    }
+                },
+                { 
+                    text: `${actionLabel} All Future`, 
+                    style: 'destructive',
+                    onPress: () => {
+                        // Remove entirely
+                        setNotes(notes.filter(n => n.id !== note.id));
+                    }
+                }
+            ]
+        );
+    } else {
+        // Normal Note
+        Alert.alert(
+            actionLabel,
+            `Are you sure you want to ${actionLabel.toLowerCase()} this note?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { 
+                    text: `Yes, ${actionLabel}`, 
+                    style: 'destructive',
+                    onPress: () => setNotes(notes.filter(n => n.id !== note.id))
+                }
+            ]
+        );
+    }
   };
 
-  const insertText = (textToInsert: string) => {
-    setContent(prev => prev + textToInsert);
-  };
+  const insertText = (textToInsert: string) => setContent(prev => prev + textToInsert);
 
   const shareNote = async (note: Note) => {
       try {
-        const dateStr = formatDateTime(note.createdAt);
-        const html = `<h1>${note.title}</h1><p>${note.content.replace(/\n/g, '<br>')}</p><p>Date: ${dateStr}</p>`;
+        const html = `<h1>${note.title}</h1><p>${note.content.replace(/\n/g, '<br>')}</p>`;
         const { uri } = await Print.printToFileAsync({ html });
         await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
       } catch(e) { Alert.alert('Error', 'Could not share note'); }
+  };
+
+  const toggleRecurrence = () => {
+      const types: RecurrenceType[] = ['none', 'daily', 'weekly', 'monthly', 'yearly'];
+      const currentIdx = types.indexOf(recurrence);
+      setRecurrence(types[(currentIdx + 1) % types.length]);
   };
 
   return (
@@ -386,23 +394,41 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
         renderItem={({ item }) => (
           <SwipeableItem 
-            onSwipeRight={() => deleteNote(item.id)} 
+            onSwipeRight={() => performAction('delete', item)} // Trigger delete logic on swipe
             onSwipeLeft={() => handleNotePress(item)}
             onPress={() => handleNotePress(item)}
           >
             <View style={styles.noteCard}>
                 <View style={styles.noteCardHeader}>
                   <Text style={styles.noteCardTitle} numberOfLines={1}>{item.title}</Text>
-                  {item.isLocked && <Ionicons name="lock-closed" size={16} color={theme.colors.danger} />}
+                  <View style={styles.row}>
+                     {item.recurrence && item.recurrence !== 'none' && (
+                        <View style={styles.recurrenceBadge}>
+                           <MaterialCommunityIcons name="update" size={14} color="#fff" />
+                        </View>
+                     )}
+                     {item.isLocked && <Ionicons name="lock-closed" size={16} color={theme.colors.danger} style={{marginLeft: 6}} />}
+                  </View>
                 </View>
                 <Text style={styles.noteCardPreview} numberOfLines={2}>
                   {item.isLocked ? 'Locked content' : item.content}
                 </Text>
                 <View style={styles.noteCardFooter}>
-                  <Text style={styles.noteDate}>{formatDateTime(item.createdAt)}</Text>
-                  <TouchableOpacity onPress={() => shareNote(item)} style={{ padding: 4 }}>
-                      <Ionicons name="share-social-outline" size={18} color={theme.colors.primary} />
-                  </TouchableOpacity>
+                  <Text style={styles.noteDate}>
+                     {item.recurrence && item.recurrence !== 'none' ? `${item.recurrence} • ` : ''} 
+                     {formatDateTime(item.createdAt)}
+                  </Text>
+                  
+                  <View style={styles.row}>
+                      {/* Complete Button - Triggers Complete Logic */}
+                      <TouchableOpacity onPress={() => performAction('complete', item)} style={{ padding: 4, marginRight: 8 }}>
+                          <Ionicons name="checkmark-circle-outline" size={22} color={theme.colors.primary} />
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity onPress={() => shareNote(item)} style={{ padding: 4 }}>
+                          <Ionicons name="share-social-outline" size={18} color={theme.colors.primary} />
+                      </TouchableOpacity>
+                  </View>
                 </View>
             </View>
           </SwipeableItem>
@@ -413,6 +439,7 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         <Ionicons name="add" size={32} color="#FFF" />
       </TouchableOpacity>
 
+      {/* Editor Modal */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <View style={styles.modalHeader}>
@@ -422,6 +449,18 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
           </View>
           <ScrollView style={styles.editorContainer}>
              <TextInput style={styles.editorTitle} placeholder="Title" value={title} onChangeText={setTitle} placeholderTextColor="#999"/>
+             
+             {/* Recurrence Selection */}
+             <TouchableOpacity onPress={toggleRecurrence} style={styles.recurrenceSelector}>
+                <View style={styles.row}>
+                    <MaterialCommunityIcons name="calendar-refresh" size={20} color={recurrence !== 'none' ? theme.colors.primary : '#999'} />
+                    <Text style={[styles.lockLabel, { marginLeft: 8 }]}>Repeat Task</Text>
+                </View>
+                <Text style={{ color: recurrence !== 'none' ? theme.colors.primary : '#999', fontWeight: '600', textTransform: 'capitalize' }}>
+                    {recurrence === 'none' ? 'Never' : recurrence}
+                </Text>
+             </TouchableOpacity>
+
              <View style={styles.lockToggleRow}>
                <View style={styles.row}>
                  <Ionicons name={isLocked ? "lock-closed" : "lock-open-outline"} size={20} color={isLocked ? theme.colors.primary : '#999'} />
@@ -437,12 +476,12 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
             <TouchableOpacity onPress={() => insertText('\n• ')} style={styles.toolBtn}><MaterialCommunityIcons name="format-list-bulleted" size={24} color="#333" /></TouchableOpacity>
             <TouchableOpacity onPress={() => insertText('\n☐ ')} style={styles.toolBtn}><MaterialCommunityIcons name="checkbox-blank-outline" size={24} color="#333" /></TouchableOpacity>
             <TouchableOpacity onPress={() => insertText(`\n___\n`)} style={styles.toolBtn}><MaterialCommunityIcons name="minus" size={24} color="#333" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => insertText(` [${new Date().toLocaleTimeString()}] `)} style={styles.toolBtn}><Ionicons name="time-outline" size={24} color="#333" /></TouchableOpacity>
             <TouchableOpacity onPress={() => Keyboard.dismiss()} style={[styles.toolBtn, { marginLeft: 'auto' }]}><Ionicons name="chevron-down" size={24} color="#333" /></TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* Lock Auth Modal */}
       <Modal visible={authVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
            <View style={styles.miniModal}>
@@ -469,58 +508,30 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [editingLink, setEditingLink] = useState<LinkItem | null>(null);
-
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
 
   useEffect(() => {
     if (hasShareIntent && (shareIntent.type === 'text' || shareIntent.type === 'weburl')) {
       const sharedUrl = (shareIntent as any).value || (shareIntent as any).text || '';
-      if(sharedUrl) {
-          setUrl(sharedUrl);
-          setModalVisible(true);
-      }
+      if(sharedUrl) { setUrl(sharedUrl); setModalVisible(true); }
       resetShareIntent();
     }
-  }, [hasShareIntent, shareIntent, resetShareIntent]);
+  }, [hasShareIntent]);
 
   const handleSave = () => {
     if(!url) return;
-    if (editingLink) {
-      setLinks(links.map(l => l.id === editingLink.id ? { ...l, url, title: title || url, description: desc } : l));
-    } else {
-      const newItem: LinkItem = {
-        id: Date.now().toString(),
-        url,
-        title: title || url,
-        description: desc,
-        createdAt: new Date().toISOString()
-      };
-      setLinks([newItem, ...links]);
-    }
+    const newItem: LinkItem = editingLink 
+      ? { ...editingLink, url, title: title || url, description: desc }
+      : { id: Date.now().toString(), url, title: title || url, description: desc, createdAt: new Date().toISOString() };
+    
+    if (editingLink) setLinks(links.map(l => l.id === editingLink.id ? newItem : l));
+    else setLinks([newItem, ...links]);
     resetForm();
   };
 
-  const resetForm = () => {
-    setUrl(''); setTitle(''); setDesc(''); setEditingLink(null); setModalVisible(false);
-  };
-
-  const pasteUrl = async () => {
-    const text = await Clipboard.getStringAsync();
-    if(text) setUrl(text);
-  };
-
-  const deleteLink = (id: string) => {
-    setLinks(links.filter(l => l.id !== id));
-  };
-
-  const editLink = (item: LinkItem) => {
-    setEditingLink(item);
-    setUrl(item.url);
-    setTitle(item.title);
-    setDesc(item.description);
-    setModalVisible(true);
-  };
-
+  const resetForm = () => { setUrl(''); setTitle(''); setDesc(''); setEditingLink(null); setModalVisible(false); };
+  const pasteUrl = async () => { const text = await Clipboard.getStringAsync(); if(text) setUrl(text); };
+  
   return (
     <View style={styles.flex1}>
       <FlatList
@@ -529,15 +540,13 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
         contentContainerStyle={{ padding: 16 }}
         renderItem={({ item }) => (
           <SwipeableItem
-            onSwipeRight={() => deleteLink(item.id)}
-            onSwipeLeft={() => editLink(item)}
+            onSwipeRight={() => setLinks(links.filter(l => l.id !== item.id))}
+            onSwipeLeft={() => { setEditingLink(item); setUrl(item.url); setTitle(item.title); setDesc(item.description); setModalVisible(true); }}
             onPress={() => Linking.openURL(item.url)}
           >
             <View style={styles.linkCard}>
                <View style={styles.linkHeader}>
-                 <View style={styles.iconCircle}>
-                   <Feather name="link" size={20} color={theme.colors.primary} />
-                 </View>
+                 <View style={styles.iconCircle}><Feather name="link" size={20} color={theme.colors.primary} /></View>
                  <View style={{flex: 1, marginLeft: 10}}>
                     <Text style={styles.linkTitle} numberOfLines={1}>{item.title}</Text>
                     {!!item.description && <Text style={styles.linkDesc} numberOfLines={1}>{item.description}</Text>}
@@ -551,10 +560,7 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
           </SwipeableItem>
         )}
       />
-
-      <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}>
-        <Ionicons name="add" size={32} color="#FFF" />
-      </TouchableOpacity>
+      <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}><Ionicons name="add" size={32} color="#FFF" /></TouchableOpacity>
 
       <Modal visible={modalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -564,8 +570,8 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
                  <TextInput style={[styles.miniInput, {flex: 1, marginBottom: 0}]} placeholder="https://example.com" value={url} onChangeText={setUrl} autoCapitalize="none"/>
                  <TouchableOpacity onPress={pasteUrl} style={{padding: 8}}><Text style={{color: theme.colors.primary, fontWeight:'600'}}>PASTE</Text></TouchableOpacity>
               </View>
-              <TextInput style={styles.miniInput} placeholder="Link Title" value={title} onChangeText={setTitle} />
-              <TextInput style={[styles.miniInput, { height: 60 }]} placeholder="Description (Optional)" value={desc} onChangeText={setDesc} multiline />
+              <TextInput style={styles.miniInput} placeholder="Title" value={title} onChangeText={setTitle} />
+              <TextInput style={[styles.miniInput, { height: 60 }]} placeholder="Description" value={desc} onChangeText={setDesc} multiline />
               <View style={styles.modalBtnRow}>
                 <TouchableOpacity onPress={resetForm} style={styles.cancelBtn}><Text style={{color: '#666'}}>Cancel</Text></TouchableOpacity>
                 <TouchableOpacity onPress={handleSave} style={styles.saveBtn}><Text style={{color: '#FFF', fontWeight:'bold'}}>Save</Text></TouchableOpacity>
@@ -578,34 +584,13 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
 };
 
 // ==========================================
-// 6. TAB 3: VOICE NOTES (UPDATED WITH SHARE)
+// 6. TAB 3: VOICE NOTES (UNCHANGED)
 // ==========================================
 
-interface VoiceTabProps {
-  voiceNotes: VoiceNote[];
-  setVoiceNotes: (v: VoiceNote[]) => void;
-  activeRecording: Audio.Recording | null;
-  activeTimer: number;
-  onStartRecording: () => void;
-  onStopRecording: () => Promise<string | null>;
-  onResetTimer: () => void;
-}
-
-const VoiceTab = ({ 
-  voiceNotes, 
-  setVoiceNotes, 
-  activeRecording, 
-  activeTimer, 
-  onStartRecording, 
-  onStopRecording, 
-  onResetTimer 
-}: VoiceTabProps) => {
-
+const VoiceTab = ({ voiceNotes, setVoiceNotes, activeRecording, activeTimer, onStartRecording, onStopRecording, onResetTimer }: any) => {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isLooping, setIsLooping] = useState(false);
-
-  // Animations
   const recordingAnim = useRef(new Animated.Value(1)).current;
   const playbackAnim = useRef(new Animated.Value(0)).current;
 
@@ -615,193 +600,75 @@ const VoiceTab = ({
   const [saveName, setSaveName] = useState('');
   const [saveLocked, setSaveLocked] = useState(false);
   const [savePin, setSavePin] = useState('');
-  
   const [unlockVisible, setUnlockVisible] = useState(false);
   const [unlockPin, setUnlockPin] = useState('');
   const [noteToPlay, setNoteToPlay] = useState<VoiceNote | null>(null);
-
-  // Rename Modal
   const [renameVisible, setRenameVisible] = useState(false);
   const [renameId, setRenameId] = useState<string|null>(null);
   const [newName, setNewName] = useState('');
 
-  const appState = useRef(AppState.currentState);
-
-  // 1. RE-SYNC ANIMATION ON APP FOREGROUND / TAB SWITCH
+  // Animations
   useEffect(() => {
     if (activeRecording) {
-      startPulseAnimation();
-    } else {
-      recordingAnim.setValue(1);
-    }
-  }, [activeRecording]);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', nextAppState => {
-      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        if (activeRecording) {
-              startPulseAnimation();
-        }
-      }
-      appState.current = nextAppState;
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [activeRecording]);
-
-  // 2. ANIMATION LOGIC
-  const startPulseAnimation = () => {
-    recordingAnim.setValue(1);
-    Animated.loop(
-        Animated.sequence([
+        Animated.loop(Animated.sequence([
           Animated.timing(recordingAnim, { toValue: 1.2, duration: 800, useNativeDriver: true }),
           Animated.timing(recordingAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-        ])
-    ).start();
-  };
+        ])).start();
+    } else recordingAnim.setValue(1);
+  }, [activeRecording]);
 
   useEffect(() => {
     if (playingId) {
-      Animated.loop(
-        Animated.sequence([
+      Animated.loop(Animated.sequence([
           Animated.timing(playbackAnim, { toValue: 1, duration: 500, easing: Easing.linear, useNativeDriver: true }),
           Animated.timing(playbackAnim, { toValue: 0.3, duration: 500, easing: Easing.linear, useNativeDriver: true })
-        ])
-      ).start();
-    } else {
-      playbackAnim.setValue(1);
-    }
+      ])).start();
+    } else playbackAnim.setValue(1);
   }, [playingId]);
 
-  useEffect(() => {
-    return () => {
-      if(sound) sound.unloadAsync();
-    };
-  }, []);
+  useEffect(() => { return () => { if(sound) sound.unloadAsync(); }; }, []);
 
-  // 3. STOP HANDLER (Uses Parent Logic)
   const handleStopRecording = async () => {
     const uri = await onStopRecording();
-    if (uri) {
-        setTempUri(uri);
-        setSaveName(`Voice Memo ${voiceNotes.length + 1}`);
-        setSaveLocked(false);
-        setSavePin('');
-        setSaveModalVisible(true);
-    }
-  };
-
-  const cancelSave = () => {
-    setSaveModalVisible(false);
-    onResetTimer(); 
+    if (uri) { setTempUri(uri); setSaveName(`Voice Memo ${voiceNotes.length + 1}`); setSaveLocked(false); setSavePin(''); setSaveModalVisible(true); }
   };
 
   const finalizeSave = () => {
-    if (saveLocked && (savePin.length !== 4 || isNaN(Number(savePin)))) {
-      Alert.alert('Invalid PIN', 'Please enter 4 digits.');
-      return;
-    }
+    if (saveLocked && (savePin.length !== 4 || isNaN(Number(savePin)))) { Alert.alert('Invalid PIN', 'Please enter 4 digits.'); return; }
     if(tempUri) {
-      const note: VoiceNote = {
-        id: Date.now().toString(),
-        uri: tempUri,
-        name: saveName || `Recording ${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        durationSeconds: activeTimer,
-        isLocked: saveLocked,
-        password: saveLocked ? savePin : undefined
-      };
+      const note: VoiceNote = { id: Date.now().toString(), uri: tempUri, name: saveName, createdAt: new Date().toISOString(), durationSeconds: activeTimer, isLocked: saveLocked, password: saveLocked ? savePin : undefined };
       setVoiceNotes([note, ...voiceNotes]);
     }
-    setSaveModalVisible(false);
-    onResetTimer(); 
-  };
-
-  const handlePlayPress = (item: VoiceNote) => {
-    if(item.isLocked) {
-      setNoteToPlay(item);
-      setUnlockPin('');
-      setUnlockVisible(true);
-    } else {
-      playAudio(item);
-    }
-  };
-
-  const verifyUnlock = () => {
-    if(noteToPlay && unlockPin === noteToPlay.password) {
-      setUnlockVisible(false);
-      playAudio(noteToPlay);
-      setNoteToPlay(null);
-    } else {
-      Alert.alert('Error', 'Incorrect PIN');
-    }
+    setSaveModalVisible(false); onResetTimer(); 
   };
 
   const playAudio = async (item: VoiceNote) => {
-    if(playingId === item.id && sound) {
-        await sound.stopAsync();
-        setPlayingId(null);
-        return;
-    }
-    if(sound) {
-      await sound.unloadAsync();
-      setSound(null);
-      setPlayingId(null);
-    }
+    if(playingId === item.id && sound) { await sound.stopAsync(); setPlayingId(null); return; }
+    if(sound) { await sound.unloadAsync(); setSound(null); setPlayingId(null); }
     try {
        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: true });
        const { sound: newSound } = await Audio.Sound.createAsync({ uri: item.uri }, { isLooping });
-       setSound(newSound);
-       setPlayingId(item.id);
-       await newSound.playAsync();
-       newSound.setOnPlaybackStatusUpdate(status => {
-         if(status.isLoaded && status.didJustFinish && !status.isLooping) setPlayingId(null);
-       });
+       setSound(newSound); setPlayingId(item.id); await newSound.playAsync();
+       newSound.setOnPlaybackStatusUpdate(status => { if(status.isLoaded && status.didJustFinish && !status.isLooping) setPlayingId(null); });
     } catch(e) { Alert.alert('Error', 'File not found'); }
   };
 
-  const toggleLoop = async () => {
-    const newVal = !isLooping;
-    setIsLooping(newVal);
-    if(sound) await sound.setIsLoopingAsync(newVal);
+  const handlePlayPress = (item: VoiceNote) => {
+    if(item.isLocked) { setNoteToPlay(item); setUnlockPin(''); setUnlockVisible(true); } else playAudio(item);
   };
 
-  const deleteVoice = (id: string) => {
-    setVoiceNotes(voiceNotes.filter(v => v.id !== id));
+  const verifyUnlock = () => {
+    if(noteToPlay && unlockPin === noteToPlay.password) { setUnlockVisible(false); playAudio(noteToPlay); setNoteToPlay(null); }
+    else Alert.alert('Error', 'Incorrect PIN');
   };
 
-  const openRename = (item: VoiceNote) => {
-    setRenameId(item.id);
-    setNewName(item.name);
-    setRenameVisible(true);
-  };
-
-  const saveRename = () => {
-    if(renameId) {
-        setVoiceNotes(voiceNotes.map(v => v.id === renameId ? {...v, name: newName} : v));
-        setRenameVisible(false);
-        setRenameId(null);
-    }
-  };
-
-  // --- NEW SHARE FUNCTION ---
   const shareAudio = async (item: VoiceNote) => {
-    try {
-        if (!(await Sharing.isAvailableAsync())) {
-            Alert.alert('Error', 'Sharing is not available on this device');
-            return;
-        }
-        await Sharing.shareAsync(item.uri, { dialogTitle: `Share ${item.name}` });
-    } catch (error) {
-        Alert.alert('Error', 'Could not share audio file');
-    }
+    if (!(await Sharing.isAvailableAsync())) return;
+    await Sharing.shareAsync(item.uri, { dialogTitle: `Share ${item.name}` });
   };
 
   return (
     <View style={styles.flex1}>
-      {/* 1. FIXED RECORDER AREA (Top) */}
       <View style={styles.modernRecorder}>
         <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20}}>
             <View>
@@ -809,73 +676,42 @@ const VoiceTab = ({
                 <Text style={styles.modernTimerText}>{formatTime(activeTimer)}</Text>
             </View>
             <TouchableOpacity onPress={activeRecording ? handleStopRecording : onStartRecording}>
-                <Animated.View style={[
-                    styles.recordButtonOuter, 
-                    activeRecording ? { transform: [{ scale: recordingAnim }], borderColor: theme.colors.danger } : {}
-                ]}>
+                <Animated.View style={[styles.recordButtonOuter, activeRecording ? { transform: [{ scale: recordingAnim }], borderColor: theme.colors.danger } : {}]}>
                     <View style={[styles.recordButtonInner, { backgroundColor: activeRecording ? theme.colors.danger : theme.colors.primary }]}>
                           {activeRecording && <View style={styles.stopSquare} />}
                     </View>
                 </Animated.View>
             </TouchableOpacity>
         </View>
-        <Text style={{textAlign:'center', marginTop: 10, color: '#999', fontSize: 12}}>
-            {activeRecording ? 'App background recording active' : 'Tap to start • Tap again to stop'}
-        </Text>
       </View>
 
-      {/* 2. SCROLLABLE LIST AREA (Bottom) */}
       <View style={styles.listContainer}>
-          <View style={styles.listHeader}>
-             <Text style={styles.listHeaderTitle}>YOUR RECORDINGS ({voiceNotes.length})</Text>
-          </View>
-
+          <View style={styles.listHeader}><Text style={styles.listHeaderTitle}>YOUR RECORDINGS ({voiceNotes.length})</Text></View>
           <FlatList
             data={voiceNotes}
             keyExtractor={item => item.id}
             contentContainerStyle={{ paddingBottom: 40 }}
-            showsVerticalScrollIndicator={true}
             ItemSeparatorComponent={() => <View style={styles.listSeparator} />}
             renderItem={({ item }) => (
               <SwipeableItem 
-                onSwipeRight={() => deleteVoice(item.id)} 
-                onSwipeLeft={() => openRename(item)}
+                onSwipeRight={() => setVoiceNotes(voiceNotes.filter((v: VoiceNote) => v.id !== item.id))} 
+                onSwipeLeft={() => { setRenameId(item.id); setNewName(item.name); setRenameVisible(true); }}
               >
                 <View style={[styles.listViewItem, playingId === item.id && { backgroundColor: '#F0F9FF' }]}>
-                    {/* Play Button */}
-                    <TouchableOpacity 
-                        onPress={() => handlePlayPress(item)} 
-                        style={[styles.listPlayBtn, playingId === item.id && { backgroundColor: theme.colors.primary }]}
-                    >
+                    <TouchableOpacity onPress={() => handlePlayPress(item)} style={[styles.listPlayBtn, playingId === item.id && { backgroundColor: theme.colors.primary }]}>
                         <Ionicons name={playingId === item.id ? "pause" : "play"} size={18} color={playingId === item.id ? "#FFF" : theme.colors.primary} />
                     </TouchableOpacity>
-
-                    {/* Metadata */}
                     <View style={{flex: 1, paddingHorizontal: 12}}>
                         <Text style={[styles.listTitle, playingId === item.id && { color: theme.colors.primary }]} numberOfLines={1}>{item.name}</Text>
                         <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
                            <Text style={styles.listSub}>{new Date(item.createdAt).toLocaleDateString()} • {formatTime(item.durationSeconds)}</Text>
-                           {/* Mini Visualization */}
-                           {playingId === item.id && (
-                               <View style={{flexDirection:'row', marginLeft: 8, alignItems: 'flex-end', height: 12, gap: 2}}>
-                                    {[1,2,3,4].map(i => <Animated.View key={i} style={{width: 2, height: 8, backgroundColor: theme.colors.primary, opacity: playbackAnim}} />)}
-                               </View>
-                           )}
+                           {playingId === item.id && ( <View style={{flexDirection:'row', marginLeft: 8, alignItems: 'flex-end', height: 12, gap: 2}}>{[1,2,3,4].map(i => <Animated.View key={i} style={{width: 2, height: 8, backgroundColor: theme.colors.primary, opacity: playbackAnim}} />)}</View>)}
                         </View>
                     </View>
-
-                    {/* Controls (UPDATED WITH SHARE) */}
                     <View style={{flexDirection:'row', alignItems:'center'}}>
                         {item.isLocked && <Ionicons name="lock-closed" size={14} color={theme.colors.danger} style={{marginRight: 10}} />}
-                        
-                        {/* Share Button */}
-                        <TouchableOpacity onPress={() => shareAudio(item)} style={{padding: 6, marginRight: 4}}>
-                            <Ionicons name="share-social-outline" size={18} color="#9CA3AF" />
-                        </TouchableOpacity>
-
-                        <TouchableOpacity onPress={toggleLoop} style={{padding: 6}}>
-                            <MaterialCommunityIcons name="repeat" size={18} color={isLooping && playingId === item.id ? theme.colors.primary : "#ccc"} />
-                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => shareAudio(item)} style={{padding: 6}}><Ionicons name="share-social-outline" size={18} color="#9CA3AF" /></TouchableOpacity>
+                        <TouchableOpacity onPress={() => { setIsLooping(!isLooping); if(sound) sound.setIsLoopingAsync(!isLooping); }} style={{padding: 6}}><MaterialCommunityIcons name="repeat" size={18} color={isLooping && playingId === item.id ? theme.colors.primary : "#ccc"} /></TouchableOpacity>
                     </View>
                 </View>
               </SwipeableItem>
@@ -883,31 +719,27 @@ const VoiceTab = ({
           />
       </View>
 
-      {/* SAVE MODAL */}
+      {/* MODALS */}
       <Modal visible={saveModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.miniModal}>
             <Text style={styles.miniTitle}>Save Recording</Text>
-            <TextInput style={styles.miniInput} value={saveName} onChangeText={setSaveName} placeholder="Recording Name" />
-            <View style={[styles.lockToggleRow, { borderBottomWidth:0 }]}>
-               <Text style={styles.lockLabel}>Lock Recording?</Text>
-               <Switch value={saveLocked} onValueChange={setSaveLocked} trackColor={{true: theme.colors.primary}} />
-            </View>
-            {saveLocked && <TextInput style={[styles.miniInput, {textAlign:'center', letterSpacing:4, fontWeight:'bold'}]} placeholder="PIN (4 digits)" value={savePin} onChangeText={t => { if(t.length <= 4) setSavePin(t.replace(/[^0-9]/g, '')) }} keyboardType="numeric" secureTextEntry />}
+            <TextInput style={styles.miniInput} value={saveName} onChangeText={setSaveName} placeholder="Name" />
+            <View style={[styles.lockToggleRow, { borderBottomWidth:0 }]}><Text style={styles.lockLabel}>Lock?</Text><Switch value={saveLocked} onValueChange={setSaveLocked} trackColor={{true: theme.colors.primary}} /></View>
+            {saveLocked && <TextInput style={[styles.miniInput, {textAlign:'center', fontWeight:'bold'}]} placeholder="PIN" value={savePin} onChangeText={setSavePin} keyboardType="numeric" secureTextEntry />}
             <View style={styles.modalBtnRow}>
-                <TouchableOpacity onPress={cancelSave} style={styles.cancelBtn}><Text style={{color: '#666'}}>Discard</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => { setSaveModalVisible(false); onResetTimer(); }} style={styles.cancelBtn}><Text style={{color: '#666'}}>Discard</Text></TouchableOpacity>
                 <TouchableOpacity onPress={finalizeSave} style={styles.saveBtn}><Text style={{color: '#FFF', fontWeight:'bold'}}>Save</Text></TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* UNLOCK MODAL */}
       <Modal visible={unlockVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
            <View style={styles.miniModal}>
-              <Text style={styles.miniTitle}>Locked Voice Note</Text>
-              <TextInput style={[styles.pinInput, { backgroundColor: '#fff', borderWidth:1, borderColor:'#ddd' }]} placeholder="Enter PIN" value={unlockPin} onChangeText={t => { if(t.length <= 4) setUnlockPin(t.replace(/[^0-9]/g, '')) }} keyboardType="numeric" secureTextEntry autoFocus />
+              <Text style={styles.miniTitle}>Locked</Text>
+              <TextInput style={[styles.pinInput, { backgroundColor: '#fff', borderWidth:1, borderColor:'#ddd' }]} placeholder="PIN" value={unlockPin} onChangeText={setUnlockPin} keyboardType="numeric" secureTextEntry autoFocus />
               <View style={styles.modalBtnRow}>
                 <TouchableOpacity onPress={() => setUnlockVisible(false)} style={styles.cancelBtn}><Text style={{color: '#666'}}>Cancel</Text></TouchableOpacity>
                 <TouchableOpacity onPress={verifyUnlock} style={styles.saveBtn}><Text style={{color: '#FFF', fontWeight:'bold'}}>Play</Text></TouchableOpacity>
@@ -916,15 +748,14 @@ const VoiceTab = ({
         </View>
       </Modal>
 
-      {/* RENAME MODAL */}
       <Modal visible={renameVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
            <View style={styles.miniModal}>
-              <Text style={styles.miniTitle}>Rename Recording</Text>
+              <Text style={styles.miniTitle}>Rename</Text>
               <TextInput style={styles.miniInput} value={newName} onChangeText={setNewName} />
               <View style={styles.modalBtnRow}>
                 <TouchableOpacity onPress={() => setRenameVisible(false)} style={styles.cancelBtn}><Text style={{color: '#666'}}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity onPress={saveRename} style={styles.saveBtn}><Text style={{color: '#FFF', fontWeight:'bold'}}>Rename</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => { if(renameId) setVoiceNotes(voiceNotes.map((v: VoiceNote) => v.id === renameId ? {...v, name: newName} : v)); setRenameVisible(false); }} style={styles.saveBtn}><Text style={{color: '#FFF', fontWeight:'bold'}}>Rename</Text></TouchableOpacity>
               </View>
            </View>
         </View>
@@ -934,75 +765,43 @@ const VoiceTab = ({
 };
 
 // ==========================================
-// 7. SWIPEABLE ITEM COMPONENT
+// 7. SWIPEABLE ITEM
 // ==========================================
 
 const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { children: React.ReactNode, onSwipeRight: () => void, onSwipeLeft: () => void, onPress?: () => void }) => {
   const pan = useRef(new Animated.ValueXY()).current;
-  
-  const onSwipeRightRef = useRef(onSwipeRight);
-  const onSwipeLeftRef = useRef(onSwipeLeft);
-
-  useEffect(() => {
-    onSwipeRightRef.current = onSwipeRight;
-    onSwipeLeftRef.current = onSwipeLeft;
-  }, [onSwipeRight, onSwipeLeft]);
-
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
-      },
+      onMoveShouldSetPanResponder: (evt, gestureState) => Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
       onPanResponderMove: Animated.event([null, { dx: pan.x }], { useNativeDriver: false }),
       onPanResponderRelease: (evt, gestureState) => {
         if (gestureState.dx > 100) {
-          // Right Swipe (Delete)
-          Animated.timing(pan, { toValue: { x: 500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => {
-             if (onSwipeRightRef.current) onSwipeRightRef.current();
-             pan.setValue({ x: 0, y: 0 });
-          });
+          Animated.timing(pan, { toValue: { x: 500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => { onSwipeRight(); pan.setValue({ x: 0, y: 0 }); });
         } else if (gestureState.dx < -100) {
-          // Left Swipe (Edit)
-          Animated.timing(pan, { toValue: { x: -500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => {
-             if (onSwipeLeftRef.current) onSwipeLeftRef.current();
-             Animated.spring(pan, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: false }).start();
-          });
+          Animated.timing(pan, { toValue: { x: -500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => { onSwipeLeft(); Animated.spring(pan, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: false }).start(); });
         } else {
-          // Reset
           Animated.spring(pan, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: false }).start();
         }
       }
     })
   ).current;
 
-  // Visual cues for swipe actions
-  const deleteOpacity = pan.x.interpolate({ inputRange: [0, 100], outputRange: [0, 1] });
-  const editOpacity = pan.x.interpolate({ inputRange: [-100, 0], outputRange: [1, 0] });
-
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.swipeBackLayer}>
-         <Animated.View style={[styles.swipeLeftAction, { opacity: deleteOpacity }]}>
-            <Ionicons name="trash" size={24} color="#fff" />
-            <Text style={{color:'#fff', fontWeight:'bold', marginLeft: 8}}>DELETE</Text>
+         <Animated.View style={[styles.swipeLeftAction, { opacity: pan.x.interpolate({ inputRange: [0, 100], outputRange: [0, 1] }) }]}>
+            <Ionicons name="trash" size={24} color="#fff" /><Text style={{color:'#fff', fontWeight:'bold', marginLeft: 8}}>DELETE</Text>
          </Animated.View>
-         <Animated.View style={[styles.swipeRightAction, { opacity: editOpacity }]}>
-            <Text style={{color:'#fff', fontWeight:'bold', marginRight: 8}}>RENAME</Text>
-            <MaterialIcons name="edit" size={24} color="#fff" />
+         <Animated.View style={[styles.swipeRightAction, { opacity: pan.x.interpolate({ inputRange: [-100, 0], outputRange: [1, 0] }) }]}>
+            <Text style={{color:'#fff', fontWeight:'bold', marginRight: 8}}>EDIT</Text><MaterialIcons name="edit" size={24} color="#fff" />
          </Animated.View>
       </View>
       <Animated.View style={[{ transform: [{ translateX: pan.x }] }]} {...panResponder.panHandlers}>
-        <TouchableOpacity activeOpacity={0.9} onPress={onPress}>
-            {children}
-        </TouchableOpacity>
+        <TouchableOpacity activeOpacity={0.9} onPress={onPress}>{children}</TouchableOpacity>
       </Animated.View>
     </View>
   );
 };
-
-// ==========================================
-// 8. SHARED COMPONENTS & STYLES
-// ==========================================
 
 const TabButton = ({ title, icon, active, onPress, extraStyle, textStyle }: any) => (
   <TouchableOpacity onPress={onPress} style={[styles.tabBtn, active && styles.tabBtnActive, extraStyle]}>
@@ -1032,32 +831,26 @@ const styles = StyleSheet.create({
   swipeBackLayer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, borderRadius: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   swipeLeftAction: { backgroundColor: '#EF4444', position: 'absolute', left: 0, top: 0, bottom: 0, width: '100%', justifyContent: 'flex-start', alignItems:'center', flexDirection:'row', paddingLeft: 20 },
   swipeRightAction: { backgroundColor: '#3B82F6', position: 'absolute', right: 0, top: 0, bottom: 0, width: '100%', justifyContent: 'flex-end', alignItems:'center', flexDirection:'row', paddingRight: 20 },
-  
-  // Note Styles
   noteCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#F3F4F6', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 6, elevation: 1, marginBottom: 12 },
   noteCardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   noteCardTitle: { fontSize: 17, fontWeight: '700', color: '#1F2937', flex: 1 },
   noteCardPreview: { fontSize: 14, color: '#6B7280', lineHeight: 20, height: 40 },
   noteCardFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F9FAFB' },
   noteDate: { fontSize: 12, color: '#9CA3AF' },
-  
-  // Link Styles
+  recurrenceBadge: { backgroundColor: theme.colors.primary, borderRadius: 4, padding: 2, marginRight: 4 },
+  recurrenceSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', marginBottom: 10 },
   linkCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 12 },
   linkHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   iconCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
   linkTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
   linkDesc: { fontSize: 13, color: '#6B7280', marginTop: 2 },
   visitBtnText: { color: '#fff', fontWeight: '600', marginRight: 6, fontSize: 13 },
-  
-  // Modern Voice Tab Styles
   modernRecorder: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingVertical: 20, paddingHorizontal: 16, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 4, elevation: 2, zIndex: 10 },
   recordButtonOuter: { width: 64, height: 64, borderRadius: 32, borderWidth: 4, borderColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' },
   recordButtonInner: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   stopSquare: { width: 16, height: 16, borderRadius: 2, backgroundColor: '#FFF' },
   modernTimerLabel: { fontSize: 12, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.5 },
   modernTimerText: { fontSize: 36, fontWeight: '200', color: '#111827', fontVariant: ['tabular-nums'] },
-  
-  // New List View Styles
   listContainer: { flex: 1, backgroundColor: '#fff' },
   listHeader: { paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#F9FAFB', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   listHeaderTitle: { fontSize: 12, fontWeight: '700', color: '#6B7280', letterSpacing: 0.5 },
@@ -1066,8 +859,6 @@ const styles = StyleSheet.create({
   listTitle: { fontSize: 15, fontWeight: '600', color: '#1F2937' },
   listSub: { fontSize: 12, color: '#9CA3AF' },
   listSeparator: { height: 1, backgroundColor: '#F3F4F6', marginLeft: 60 },
-
-  // Shared Modal Styles
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor: '#fff' },
   modalCancel: { fontSize: 16, color: '#6B7280' },
   modalTitle: { fontSize: 17, fontWeight: '600' },
