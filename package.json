@@ -37,6 +37,7 @@
     "expo-permissions": "^14.4.0",
     "expo-print": "~15.0.8",
     "expo-router": "~6.0.19",
+    "expo-sensors": "~15.0.8",
     "expo-share-intent": "^5.1.1",
     "expo-sharing": "~14.0.8",
     "expo-splash-screen": "~31.0.12",

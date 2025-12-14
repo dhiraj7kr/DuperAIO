@@ -330,7 +330,7 @@ const HomeScreen: React.FC = () => {
         const current = new Date();
         setNow(current);
         if (current.getSeconds() === 0) loadData();
-        if (current.getSeconds() % 15 === 0) fetchEnvironment();
+        if (current.getMinutes() % 15 === 0) fetchEnvironment();
     }, 1000);
     return () => clearInterval(interval);
   }, []);
