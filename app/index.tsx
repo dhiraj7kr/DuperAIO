@@ -552,7 +552,7 @@ const HomeScreen: React.FC = () => {
                         <Ionicons name="close" size={24} color="#9CA3AF" />
                     </TouchableOpacity>
                 </View>
-                
+                {/* Margin from the Center */}
                 <View style={{alignItems:'center', marginBottom: 24}}>
                     <TouchableOpacity onPress={pickImage}>
                         {profile.avatarUri ? 
