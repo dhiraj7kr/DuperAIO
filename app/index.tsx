@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
+  Easing,
   Image,
   Modal,
   RefreshControl,
@@ -18,33 +19,29 @@ import {
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  View
+  View,
+  ViewStyle
 } from 'react-native';
 
 import { useAppData } from '../src/context/AppDataContext';
 
 // ==========================================
-// 1. CONFIG & SHARED KEYS
+// 1. CONFIG & TYPES
 // ==========================================
 const PLANNER_KEY = 'plannerTasks_v3';
 const FOCUS_KEY = 'focus_of_day_v1';
 const WATER_KEY = 'water_tracker_v1';
+const WATER_GOAL = 8;
+const STREAK_DAYS_LxOOKBACK = 13; // 14 days total including today
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const THEME = {
-  bg: '#F8FAFC',           // Ultra Light Blue-Gray (Cleaner look)
-  textMain: '#111827',     // Near Black
-  textSub: '#64748B',      // Slate Gray
-  accentBlue: '#3B82F6',   // Bright Blue
-  accentDark: '#1E293B',   // Slate 800 (for dark cards)
-  
-  // Status Colors
-  success: '#10B981',
-  warning: '#F59E0B',
-  danger: '#EF4444',
-  
-  // Github Streak Colors
+  bg: '#F8FAFC',
+  textMain: '#111827',
+  textSub: '#64748B',
+  accentBlue: '#3B82F6',
+  accentDark: '#1E293B',
   streak0: '#E2E8F0',
   streak1: '#86EFAC',
   streak2: '#4ADE80',
@@ -60,24 +57,48 @@ const QUOTES = [
   "Small progress is still progress.",
 ];
 
+// --- Interfaces ---
+interface Task {
+  title: string;
+  date: string;
+  startTime?: string;
+  repeat: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+  isCompleted: boolean;
+  completedExceptions?: string[];
+  notes?: string;
+}
+
+interface WeatherData {
+  code: number;
+  temp: string;
+  city: string;
+  aqi: number;
+}
+
+interface StreakItem {
+  date: string;
+  count: number;
+  intensity: number;
+}
+
 // ==========================================
 // 2. HELPER FUNCTIONS
 // ==========================================
 
 const getLocalDateString = (dateObj = new Date()) => {
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  // Returns YYYY-MM-DD using local time logic
+  const offset = dateObj.getTimezoneOffset() * 60000;
+  return new Date(dateObj.getTime() - offset).toISOString().split('T')[0];
 };
 
 const toDate = (isoDate: string) => new Date(isoDate + 'T00:00:00');
+
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
 
-const occursOnDate = (task: any, targetDateStr: string): boolean => {
+const occursOnDate = (task: Task, targetDateStr: string): boolean => {
   const base = toDate(task.date);
   const current = toDate(targetDateStr);
   
@@ -94,18 +115,18 @@ const occursOnDate = (task: any, targetDateStr: string): boolean => {
 };
 
 const getWeatherMeta = (wmoCode: number) => {
-  if (wmoCode === 0) return { label: 'Clear Sky', icon: 'sunny' };
-  if ([1, 2, 3].includes(wmoCode)) return { label: 'Cloudy', icon: 'cloud' };
-  if ([51, 53, 55, 61, 63, 65, 66, 67].includes(wmoCode)) return { label: 'Rain', icon: 'rainy' };
-  if ([71, 73, 75, 77].includes(wmoCode)) return { label: 'Snow', icon: 'snow' };
-  return { label: 'Clear', icon: 'sunny' };
+  if (wmoCode === 0) return { label: 'Clear Sky', icon: 'sunny', type: 'sun' };
+  if ([1, 2, 3].includes(wmoCode)) return { label: 'Cloudy', icon: 'cloud', type: 'cloud' };
+  if ([51, 53, 55, 61, 63, 65, 66, 67, 80, 81, 82].includes(wmoCode)) return { label: 'Rain', icon: 'rainy', type: 'rain' };
+  if ([71, 73, 75, 77, 85, 86].includes(wmoCode)) return { label: 'Snow', icon: 'snow', type: 'snow' };
+  return { label: 'Clear', icon: 'sunny', type: 'sun' };
 };
 
 const getAqiMeta = (aqi: number) => {
-  if (aqi <= 50) return { label: 'Good', color: '#4ADE80', percentage: '100%' };
-  if (aqi <= 100) return { label: 'Moderate', color: '#FACC15', percentage: '60%' };
-  if (aqi <= 150) return { label: 'Unhealthy', color: '#F87171', percentage: '30%' };
-  return { label: 'Hazardous', color: '#EF4444', percentage: '10%' };
+  if (aqi <= 50) return { label: 'Good', color: '#4ADE80' };
+  if (aqi <= 100) return { label: 'Moderate', color: '#FACC15' };
+  if (aqi <= 150) return { label: 'Unhealthy', color: '#F87171' };
+  return { label: 'Hazardous', color: '#EF4444' };
 };
 
 const getGreeting = (hour: number) => {
@@ -115,101 +136,52 @@ const getGreeting = (hour: number) => {
 };
 
 // ==========================================
-// 3. COMPONENTS
+// 3. CUSTOM HOOKS (Logic Extraction)
 // ==========================================
-const BouncyCard = ({ children, onPress, style }: any) => {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const onPressIn = () => Animated.spring(scaleAnim, { toValue: 0.97, useNativeDriver: true, speed: 20 }).start();
-  const onPressOut = () => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 20 }).start();
 
-  return (
-    <TouchableWithoutFeedback onPressIn={onPressIn} onPressOut={onPressOut} onPress={onPress}>
-      <Animated.View style={[style, { transform: [{ scale: scaleAnim }] }]}>
-        {children}
-      </Animated.View>
-    </TouchableWithoutFeedback>
-  );
-};
-
-// ==========================================
-// 4. MAIN SCREEN
-// ==========================================
-const HomeScreen: React.FC = () => {
-  const { data, updateProfile } = useAppData();
-  const { profile } = data;
-  const router = useRouter();
-
-  // --- STATE ---
-  const [now, setNow] = useState(new Date());
-  const [refreshing, setRefreshing] = useState(false);
-  const [editVisible, setEditVisible] = useState(false);
-  
-  // Real-time Data
-  const [todayTasks, setTodayTasks] = useState<any[]>([]);
-  const [focusText, setFocusText] = useState('');
-  
-  // Water Tracker
-  const [waterCount, setWaterCount] = useState(0);
-  const WATER_GOAL = 8;
-  
-  // Quote
-  const [quote, setQuote] = useState(QUOTES[0]);
-
-  // Streak Data
-  const [streakHistory, setStreakHistory] = useState<any[]>([]);
-  const [currentStreak, setCurrentStreak] = useState(0);
-
-  // Environment Data
-  const [weather, setWeather] = useState({ code: 0, temp: '--', city: 'Locating...', aqi: 0 });
+const useWeather = (userLocation: string | undefined) => {
+  const [weather, setWeather] = useState<WeatherData>({ code: 0, temp: '--', city: 'Locating...', aqi: 0 });
   const [netInfo, setNetInfo] = useState<any>(null);
   const [ping, setPing] = useState<number | null>(null);
 
-  // Form State
-  const [name, setName] = useState(profile.name);
-  const [role, setRole] = useState(profile.role);
-
-  // Time Strings
-  const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
-  const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  const greeting = getGreeting(now.getHours());
-
-  // --- 0. PICK IMAGE FUNCTION ---
-  const pickImage = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.5,
-      });
-
-      if (!result.canceled) {
-        updateProfile({ ...profile, avatarUri: result.assets[0].uri });
-      }
-    } catch (error) {
-      console.log('Error picking image:', error);
-    }
-  };
-
-  // --- 1. FETCH ENVIRONMENT ---
   const fetchEnvironment = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({});
+        
         const [wRes, aRes] = await Promise.all([
              fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.coords.latitude}&longitude=${loc.coords.longitude}&current_weather=true`),
              fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.coords.latitude}&longitude=${loc.coords.longitude}&current=us_aqi`)
         ]);
         const wData = await wRes.json();
         const aData = await aRes.json();
+
+        // Reverse Geocoding
+        let locationDisplay = userLocation || 'Unknown Location';
+        try {
+            const geocodeResult = await Location.reverseGeocodeAsync({
+                latitude: loc.coords.latitude,
+                longitude: loc.coords.longitude
+            });
+
+            if (geocodeResult && geocodeResult.length > 0) {
+                const address = geocodeResult[0];
+                const city = address.city || address.subregion || address.region;
+                const country = address.country;
+                if (city && country) locationDisplay = `${city}, ${country}`;
+                else if (city) locationDisplay = city;
+                else if (country) locationDisplay = country;
+            }
+        } catch (geoError) {
+            console.log("Geocoding failed:", geoError);
+        }
         
         if (wData.current_weather) {
           setWeather({
             code: wData.current_weather.weathercode,
             temp: `${Math.round(wData.current_weather.temperature)}°`,
-            city: profile.location || 'Hyderabad',
+            city: locationDisplay,
             aqi: aData.current ? aData.current.us_aqi : 0,
           });
         }
@@ -227,49 +199,51 @@ const HomeScreen: React.FC = () => {
     } catch (e) { console.log(e); }
   };
 
-  // --- 2. LOAD DATA (Tasks, Streak, Water) ---
-  const loadData = async () => {
+  return { weather, netInfo, ping, fetchEnvironment };
+};
+
+const useTasks = () => {
+  const [todayTasks, setTodayTasks] = useState<Task[]>([]);
+  const [streakHistory, setStreakHistory] = useState<StreakItem[]>([]);
+  const [currentStreak, setCurrentStreak] = useState(0);
+
+  const loadTasks = async () => {
     try {
-      // TASKS & STREAK
       const tasksJson = await AsyncStorage.getItem(PLANNER_KEY);
       if (tasksJson) {
-        const allTasks = JSON.parse(tasksJson);
+        const allTasks: Task[] = JSON.parse(tasksJson);
         const todayStr = getLocalDateString(new Date());
         const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
 
         // Filter for today
-        const filtered = allTasks.filter((t: any) => {
+        const filtered = allTasks.filter((t) => {
            const occurs = occursOnDate(t, todayStr);
            const isException = t.completedExceptions && t.completedExceptions.includes(todayStr);
            const isOneTimeDone = t.repeat === 'none' && t.isCompleted;
-
            let isFuture = true;
            if (t.startTime) {
                const [h, m] = t.startTime.split(':').map(Number);
                const taskMinutes = h * 60 + m;
                if (taskMinutes < currentMinutes) isFuture = false; 
            }
-
            return occurs && !isOneTimeDone && !isException && isFuture;
         });
-        filtered.sort((a: any, b: any) => (a.startTime || '23:59').localeCompare(b.startTime || '23:59'));
+        filtered.sort((a, b) => (a.startTime || '23:59').localeCompare(b.startTime || '23:59'));
         setTodayTasks(filtered);
 
-        // Streak History
-        const history = [];
-        for (let i = 13; i >= 0; i--) {
+        // Streak History Calculation
+        const history: StreakItem[] = [];
+        for (let i = STREAK_DAYS_LxOOKBACK; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
             const dStr = getLocalDateString(d); 
-            
             let count = 0;
-            allTasks.forEach((t: any) => {
+            allTasks.forEach((t) => {
                 const occurs = occursOnDate(t, dStr);
                 const isRecurringDone = t.completedExceptions && t.completedExceptions.includes(dStr);
                 const isOneTimeDone = t.repeat === 'none' && t.isCompleted && t.date === dStr;
                 if (occurs && (isRecurringDone || isOneTimeDone)) count++;
             });
-
             let intensity = 0;
             if (count > 0) intensity = 1;
             if (count > 2) intensity = 2;
@@ -277,7 +251,7 @@ const HomeScreen: React.FC = () => {
             if (count > 6) intensity = 4;
             history.push({ date: dStr, count, intensity });
         }
-
+        
         let tempStreak = 0;
         for (let i = history.length - 1; i >= 0; i--) {
             if (history[i].count > 0) tempStreak++;
@@ -287,12 +261,17 @@ const HomeScreen: React.FC = () => {
         setCurrentStreak(tempStreak);
         setStreakHistory(history);
       }
+    } catch (e) { console.error("Error loading tasks", e); }
+  };
 
-      // FOCUS
-      const savedFocus = await AsyncStorage.getItem(FOCUS_KEY);
-      if (savedFocus) setFocusText(savedFocus);
+  return { todayTasks, streakHistory, currentStreak, loadTasks };
+};
 
-      // WATER
+const useWaterTracker = () => {
+  const [waterCount, setWaterCount] = useState(0);
+
+  const loadWater = async () => {
+    try {
       const todayStr = getLocalDateString(new Date());
       const savedWater = await AsyncStorage.getItem(WATER_KEY);
       if (savedWater) {
@@ -300,20 +279,10 @@ const HomeScreen: React.FC = () => {
           if (parsedWater.date === todayStr) {
               setWaterCount(parsedWater.count);
           } else {
-              setWaterCount(0); // Reset for new day
+              setWaterCount(0);
           }
       }
-
-      // QUOTE (Random)
-      const randomIndex = Math.floor(Math.random() * QUOTES.length);
-      setQuote(QUOTES[randomIndex]);
-
     } catch (e) {}
-  };
-
-  const saveFocus = async (text: string) => {
-      setFocusText(text);
-      try { await AsyncStorage.setItem(FOCUS_KEY, text); } catch(e) {}
   };
 
   const addWater = async () => {
@@ -323,53 +292,221 @@ const HomeScreen: React.FC = () => {
       try { await AsyncStorage.setItem(WATER_KEY, JSON.stringify(data)); } catch(e) {}
   };
 
-  // --- UPDATED INTERVAL LOGIC ---
+  return { waterCount, addWater, loadWater };
+};
+
+// ==========================================
+// 4. ANIMATION COMPONENTS
+// ==========================================
+
+const SunAnimation = () => {
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
-    // Initial Load
-    fetchEnvironment();
-    loadData();
+    Animated.loop(
+      Animated.timing(rotateAnim, {
+        toValue: 1,
+        duration: 8000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, []);
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <Animated.View style={[styles.weatherAnimContainer, { transform: [{ rotate: spin }] }]}>
+      <Ionicons name="sunny" size={140} color="#FDB813" style={{ opacity: 0.2 }} />
+    </Animated.View>
+  );
+};
+
+interface FallingParticleProps {
+  delay: number;
+  duration: number;
+  startX: number;
+  children: React.ReactNode;
+}
+
+const FallingParticle: React.FC<FallingParticleProps> = ({ delay, duration, startX, children }) => {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: duration,
+          delay: delay,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  const translateY = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-20, 180],
+  });
+
+  return (
+    <Animated.View style={{ position: 'absolute', left: startX, top: 0, transform: [{ translateY }] }}>
+      {children}
+    </Animated.View>
+  );
+};
+
+const RainAnimation = () => {
+  const drops = useRef(Array.from({ length: 15 }).map((_, i) => ({
+    id: i,
+    startX: Math.random() * (SCREEN_WIDTH - 80),
+    delay: Math.random() * 1000,
+    duration: 800 + Math.random() * 500,
+  }))).current;
+
+  return (
+    <View style={[styles.weatherAnimContainer, styles.overflowHidden]}>
+      {drops.map((drop) => (
+        <FallingParticle key={drop.id} {...drop}>
+          <View style={styles.rainDrop} />
+        </FallingParticle>
+      ))}
+    </View>
+  );
+};
+
+const SnowAnimation = () => {
+  const flakes = useRef(Array.from({ length: 12 }).map((_, i) => ({
+    id: i,
+    startX: Math.random() * (SCREEN_WIDTH - 80),
+    delay: Math.random() * 2000,
+    duration: 2500 + Math.random() * 1000,
+  }))).current;
+
+  return (
+    <View style={[styles.weatherAnimContainer, styles.overflowHidden]}>
+      {flakes.map((flake) => (
+        <FallingParticle key={flake.id} {...flake}>
+          <View style={styles.snowFlake} />
+        </FallingParticle>
+      ))}
+    </View>
+  );
+};
+
+const WeatherEffect = ({ type }: { type: string }) => {
+  if (type === 'sun') return <SunAnimation />;
+  if (type === 'rain') return <RainAnimation />;
+  if (type === 'snow') return <SnowAnimation />;
+  return null;
+};
+
+// ==========================================
+// 5. MAIN COMPONENT
+// ==========================================
+
+const BouncyCard = ({ children, onPress, style }: { children: React.ReactNode, onPress?: () => void, style?: ViewStyle | ViewStyle[] }) => {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const onPressIn = () => Animated.spring(scaleAnim, { toValue: 0.97, useNativeDriver: true, speed: 20 }).start();
+  const onPressOut = () => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 20 }).start();
+
+  return (
+    <TouchableWithoutFeedback onPressIn={onPressIn} onPressOut={onPressOut} onPress={onPress}>
+      <Animated.View style={[style, { transform: [{ scale: scaleAnim }] }]}>
+        {children}
+      </Animated.View>
+    </TouchableWithoutFeedback>
+  );
+};
+
+const HomeScreen: React.FC = () => {
+  const { data, updateProfile } = useAppData();
+  const { profile } = data;
+  const router = useRouter();
+
+  // Custom Hooks for Logic Separation
+  const { weather, netInfo, ping, fetchEnvironment } = useWeather(profile.location);
+  const { todayTasks, streakHistory, currentStreak, loadTasks } = useTasks();
+  const { waterCount, addWater, loadWater } = useWaterTracker();
+
+  // Local State
+  const [now, setNow] = useState(new Date());
+  const [refreshing, setRefreshing] = useState(false);
+  const [editVisible, setEditVisible] = useState(false);
+  const [focusText, setFocusText] = useState('');
+  const [quote, setQuote] = useState(QUOTES[0]);
+  const [name, setName] = useState(profile.name);
+  const [role, setRole] = useState(profile.role);
+
+  // Derived Strings
+  const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const greeting = getGreeting(now.getHours());
+  const weatherMeta = getWeatherMeta(weather.code);
+  const aqiMeta = getAqiMeta(weather.aqi);
+  const nextTask = todayTasks.length > 0 ? todayTasks[0] : null;
+
+  // Actions
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+      });
+
+      if (!result.canceled) {
+        updateProfile({ ...profile, avatarUri: result.assets[0].uri });
+      }
+    } catch (error) {
+      console.log('Error picking image:', error);
+    }
+  };
+
+  const saveFocus = async (text: string) => {
+      setFocusText(text);
+      try { await AsyncStorage.setItem(FOCUS_KEY, text); } catch(e) {}
+  };
+
+  // Initialization & Timers
+  useEffect(() => {
+    const init = async () => {
+       await Promise.all([fetchEnvironment(), loadTasks(), loadWater()]);
+       const savedFocus = await AsyncStorage.getItem(FOCUS_KEY);
+       if (savedFocus) setFocusText(savedFocus);
+       const randomIndex = Math.floor(Math.random() * QUOTES.length);
+       setQuote(QUOTES[randomIndex]);
+    };
+    init();
 
     const interval = setInterval(() => {
         const current = new Date();
-        setNow(current); // Update Clock UI every second
-
-        // Execute logic only at the start of a minute (Seconds == 0)
+        setNow(current); 
+        // Sync checks on minute start
         if (current.getSeconds() === 0) {
-            
-            // 1. Update Task List (Every Minute)
-            loadData();
-            
-            // 2. Update Environment/Network (Every 5 Minutes)
-            // Checks if current minute is 0, 5, 10, 15, etc.
+            loadTasks();
             if (current.getMinutes() % 5 === 0) {
                 fetchEnvironment();
             }
         }
     }, 1000);
-
     return () => clearInterval(interval);
   }, []);
 
-  useFocusEffect(useCallback(() => { loadData(); }, []));
+  useFocusEffect(useCallback(() => { loadTasks(); loadWater(); }, []));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([fetchEnvironment(), loadData()]);
+    await Promise.all([fetchEnvironment(), loadTasks(), loadWater()]);
     setRefreshing(false);
   }, []);
-
-  const weatherMeta = getWeatherMeta(weather.code);
-  const aqiMeta = getAqiMeta(weather.aqi);
-  const nextTask = todayTasks.length > 0 ? todayTasks[0] : null;
-
-  const renderStreakBox = (item: any, index: number) => {
-      let color = THEME.streak0;
-      if (item.intensity === 1) color = THEME.streak1;
-      if (item.intensity === 2) color = THEME.streak2;
-      if (item.intensity === 3) color = THEME.streak3;
-      if (item.intensity === 4) color = THEME.streak4;
-      return <View key={index} style={[styles.streakBox, { backgroundColor: color }]} />;
-  };
 
   return (
     <View style={styles.container}>
@@ -381,7 +518,7 @@ const HomeScreen: React.FC = () => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         
-        {/* --- 1. HEADER (LOGO + PROFILE) --- */}
+        {/* --- 1. HEADER --- */}
         <View style={styles.headerRow}>
            <View style={{flexDirection:'row', alignItems:'center', gap: 10}}>
                <Image 
@@ -405,13 +542,15 @@ const HomeScreen: React.FC = () => {
            </TouchableOpacity>
         </View>
 
-        {/* --- 2. PERSONAL GREETING --- */}
+        {/* --- 2. GREETING --- */}
         <View style={{marginBottom: 16}}>
             <Text style={styles.greetingText}>{greeting}, {profile.name || 'User'}</Text>
         </View>
 
-        {/* --- 3. COMMAND CENTER (Weather & Net) --- */}
+        {/* --- 3. COMMAND CENTER --- */}
         <BouncyCard style={styles.commandCard}>
+            <WeatherEffect type={weatherMeta.type} />
+
             <View style={styles.commandTopRow}>
                 <View>
                     <Text style={styles.commandTemp}>{weather.temp}</Text>
@@ -423,17 +562,14 @@ const HomeScreen: React.FC = () => {
             <View style={styles.commandDivider} />
 
             <View style={styles.commandStatsRow}>
-                 {/* Date & Time */}
                 <View style={styles.commandStat}>
                      <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.7)" />
                      <Text style={styles.commandStatText}>{dateStr} • {timeStr}</Text>
                 </View>
-                {/* AQI */}
                 <View style={styles.commandStat}>
                      <Ionicons name="leaf-outline" size={16} color={aqiMeta.color} />
                      <Text style={[styles.commandStatText, {color: aqiMeta.color}]}>AQI {weather.aqi}</Text>
                 </View>
-                {/* Ping */}
                 <View style={styles.commandStat}>
                      <Ionicons name="wifi-outline" size={16} color="rgba(255,255,255,0.7)" />
                      <Text style={styles.commandStatText}>{ping ? `${ping}ms` : 'Offline'}</Text>
@@ -441,9 +577,8 @@ const HomeScreen: React.FC = () => {
             </View>
         </BouncyCard>
 
-        {/* --- 4. BENTO GRID (Focus & Water) --- */}
+        {/* --- 4. BENTO GRID --- */}
         <View style={styles.bentoRow}>
-            {/* FOCUS WIDGET */}
             <BouncyCard style={[styles.bentoItem, styles.focusCard]}>
                 <View style={styles.bentoHeader}>
                     <View style={[styles.iconCircle, {backgroundColor: '#DBEAFE'}]}>
@@ -463,7 +598,6 @@ const HomeScreen: React.FC = () => {
                 />
             </BouncyCard>
 
-            {/* WATER WIDGET */}
             <BouncyCard onPress={addWater} style={[styles.bentoItem, styles.waterCard]}>
                 <View style={styles.bentoHeader}>
                     <View style={[styles.iconCircle, {backgroundColor: '#E0F2FE'}]}>
@@ -475,14 +609,13 @@ const HomeScreen: React.FC = () => {
                     <Text style={styles.waterCount}>{waterCount}<Text style={styles.waterTotal}>/{WATER_GOAL}</Text></Text>
                     <Text style={styles.waterUnit}>glasses</Text>
                 </View>
-                {/* Progress Bar */}
                 <View style={styles.waterBarBg}>
                     <View style={[styles.waterBarFill, { width: `${(waterCount/WATER_GOAL)*100}%` }]} />
                 </View>
             </BouncyCard>
         </View>
 
-        {/* --- 5. STREAK & CONSISTENCY --- */}
+        {/* --- 5. STREAK --- */}
         <BouncyCard style={styles.streakCard}>
              <View style={styles.streakHeader}>
                  <View style={{flexDirection:'row', alignItems:'center', gap: 6}}>
@@ -492,16 +625,23 @@ const HomeScreen: React.FC = () => {
                  <Text style={styles.streakCount}>{currentStreak} Day Streak 🔥</Text>
              </View>
              <View style={styles.streakGrid}>
-                 {streakHistory.map((item, index) => renderStreakBox(item, index))}
+                 {streakHistory.map((item, index) => {
+                     let color = THEME.streak0;
+                     if (item.intensity === 1) color = THEME.streak1;
+                     if (item.intensity === 2) color = THEME.streak2;
+                     if (item.intensity === 3) color = THEME.streak3;
+                     if (item.intensity === 4) color = THEME.streak4;
+                     return <View key={index} style={[styles.streakBox, { backgroundColor: color }]} />;
+                 })}
              </View>
         </BouncyCard>
 
-        {/* --- 6. DAILY QUOTE --- */}
+        {/* --- 6. QUOTE --- */}
         <View style={styles.quoteContainer}>
             <Text style={styles.quoteText}>"{quote}"</Text>
         </View>
 
-        {/* --- 7. UP NEXT TASKS --- */}
+        {/* --- 7. TASKS --- */}
         <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitleNoMargin}>Up Next</Text>
             <TouchableOpacity onPress={() => router.push('/planner')}>
@@ -542,7 +682,7 @@ const HomeScreen: React.FC = () => {
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* --- EDIT PROFILE MODAL --- */}
+      {/* --- EDIT MODAL --- */}
       <Modal visible={editVisible} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
             <View style={styles.modalContent}>
@@ -552,7 +692,6 @@ const HomeScreen: React.FC = () => {
                         <Ionicons name="close" size={24} color="#9CA3AF" />
                     </TouchableOpacity>
                 </View>
-                {/* Margin from the Center */}
                 <View style={{alignItems:'center', marginBottom: 24}}>
                     <TouchableOpacity onPress={pickImage}>
                         {profile.avatarUri ? 
@@ -588,7 +727,7 @@ const HomeScreen: React.FC = () => {
 export default HomeScreen;
 
 // ==========================================
-// 5. STYLES
+// 6. STYLES
 // ==========================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg },
@@ -598,8 +737,6 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   appNameText: { fontSize: 28, fontWeight: '900', color: '#002C8A', letterSpacing: -0.5 },
   logoImage: { width: 42, height: 42 },
-  
-  // Greeting Sub-header
   greetingText: { fontSize: 22, color: THEME.textMain, fontWeight: '700', letterSpacing: -0.5 },
 
   // Profile
@@ -609,18 +746,27 @@ const styles = StyleSheet.create({
   avatarInitials: { fontSize: 18, fontWeight:'700', color: '#64748B' },
   editBadge: { position: 'absolute', bottom: -2, right: -2, backgroundColor: THEME.textMain, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
 
-  // --- Command Center (Weather) ---
+  // --- Command Center ---
   commandCard: {
       backgroundColor: THEME.accentDark, borderRadius: 24, padding: 20, marginBottom: 20,
-      shadowColor: "#1E293B", shadowOffset: {width:0, height:8}, shadowOpacity:0.25, shadowRadius:12, elevation: 6
+      shadowColor: "#1E293B", shadowOffset: {width:0, height:8}, shadowOpacity:0.25, shadowRadius:12, elevation: 6,
+      overflow: 'hidden', 
+      position: 'relative' 
   },
-  commandTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  weatherAnimContainer: {
+      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+      zIndex: 0, justifyContent: 'center', alignItems: 'center'
+  },
+  overflowHidden: { width: '100%', overflow: 'hidden' },
+  commandTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 1 },
   commandTemp: { fontSize: 42, fontWeight: '800', color: '#FFF', letterSpacing: -1 },
   commandCondition: { fontSize: 14, fontWeight: '600', color: '#94A3B8', marginTop: 4 },
   commandDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.15)', marginVertical: 16 },
-  commandStatsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  commandStatsRow: { flexDirection: 'row', justifyContent: 'space-between', zIndex: 1 },
   commandStat: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   commandStatText: { fontSize: 13, color: '#FFF', fontWeight: '600' },
+  rainDrop: { width: 2, height: 15, backgroundColor: '#60A5FA', opacity: 0.6, borderRadius: 1 },
+  snowFlake: { width: 6, height: 6, backgroundColor: '#FFFFFF', opacity: 0.8, borderRadius: 3 },
 
   // --- Bento Grid ---
   bentoRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
@@ -629,11 +775,9 @@ const styles = StyleSheet.create({
   iconCircle: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   bentoTitle: { fontSize: 14, fontWeight: '700', color: THEME.textMain },
   
-  // Focus Specific
   focusCard: { minHeight: 140 },
   focusInput: { fontSize: 15, color: THEME.textMain, fontWeight: '500', lineHeight: 22 },
   
-  // Water Specific
   waterCard: { minHeight: 140, justifyContent:'space-between' },
   waterContent: { alignItems:'center', marginVertical: 4 },
   waterCount: { fontSize: 32, fontWeight: '800', color: '#0EA5E9' },
@@ -642,7 +786,7 @@ const styles = StyleSheet.create({
   waterBarBg: { height: 6, backgroundColor: '#F1F5F9', borderRadius: 3, width: '100%', overflow:'hidden' },
   waterBarFill: { height: '100%', backgroundColor: '#0EA5E9', borderRadius: 3 },
 
-  // --- Streak Card ---
+  // --- Streak ---
   streakCard: {
     backgroundColor: '#fff', borderRadius: 20, padding: 16, marginBottom: 20,
     shadowColor: "#000", shadowOffset: {width:0, height:2}, shadowOpacity:0.03, shadowRadius:6, elevation: 1
@@ -657,7 +801,7 @@ const styles = StyleSheet.create({
   quoteContainer: { alignItems:'center', paddingHorizontal: 20, marginBottom: 30 },
   quoteText: { fontSize: 14, fontStyle: 'italic', color: '#94A3B8', textAlign: 'center', fontWeight: '500' },
 
-  // --- Up Next ---
+  // --- Tasks ---
   sectionTitleNoMargin: { fontSize: 18, fontWeight: '800', color: THEME.textMain },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   linkText: { color: THEME.accentBlue, fontWeight: '700', fontSize: 13 },
@@ -677,7 +821,7 @@ const styles = StyleSheet.create({
   emptyText: { color: THEME.textMain, fontWeight: '700', fontSize: 15 },
   emptySub: { color: '#94A3B8', fontWeight: '500' },
 
-  // --- MODAL ---
+  // --- Modal ---
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
   modalContent: { backgroundColor: '#fff', borderRadius: 24, padding: 24, alignItems: 'center' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 20 },

@@ -1,5 +1,5 @@
 import { Feather, Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Switched to AsyncStorage
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
@@ -32,7 +32,7 @@ import { theme } from '../src/theme/theme';
 // ==========================================
 // 1. CONFIGURATION & TYPES
 // ==========================================
-const STORAGE_KEY = 'app_data_notes_v12'; // Aligned with Planner naming convention
+const STORAGE_KEY = 'app_data_notes_v12'; 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -108,7 +108,7 @@ export default function NotesScreen() {
   const [activeRecording, setActiveRecording] = useState<Audio.Recording | null>(null);
   const [recordingTimer, setRecordingTimer] = useState(0);
 
-  // --- PERSISTENCE (PLANNER STYLE) ---
+  // --- PERSISTENCE ---
   useEffect(() => {
     (async () => {
       try {
@@ -164,7 +164,7 @@ export default function NotesScreen() {
 
   const resetTimer = () => setRecordingTimer(0);
 
-  // --- UPDATE WRAPPERS (CENTRALIZED LIKE PLANNER) ---
+  // --- UPDATE WRAPPERS ---
   const updateNotes = (newNotes: Note[]) => saveData({ ...data, notes: newNotes });
   const updateLinks = (newLinks: LinkItem[]) => saveData({ ...data, links: newLinks });
   const updateVoiceNotes = (newVoiceNotes: VoiceNote[]) => saveData({ ...data, voiceNotes: newVoiceNotes });
@@ -395,8 +395,8 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
                 </Text>
                 <View style={styles.noteCardFooter}>
                   <Text style={styles.noteDate}>
-                     {item.recurrence && item.recurrence !== 'none' ? `${item.recurrence} • ` : ''} 
-                     {formatDateTime(item.createdAt)}
+                      {item.recurrence && item.recurrence !== 'none' ? `${item.recurrence} • ` : ''} 
+                      {formatDateTime(item.createdAt)}
                   </Text>
                   
                   <View style={styles.row}>
@@ -418,44 +418,55 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         <Ionicons name="add" size={32} color="#FFF" />
       </TouchableOpacity>
 
-      <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setModalVisible(false)}><Text style={styles.modalCancel}>Cancel</Text></TouchableOpacity>
-            <Text style={styles.modalTitle}>{editingId ? 'Edit Note' : 'New Note'}</Text>
-            <TouchableOpacity onPress={saveNote}><Text style={styles.modalSave}>Done</Text></TouchableOpacity>
-          </View>
-          <ScrollView style={styles.editorContainer}>
-             <TextInput style={styles.editorTitle} placeholder="Title" value={title} onChangeText={setTitle} placeholderTextColor="#999"/>
-             
-             <TouchableOpacity onPress={toggleRecurrence} style={styles.recurrenceSelector}>
-                <View style={styles.row}>
-                    <MaterialCommunityIcons name="calendar-refresh" size={20} color={recurrence !== 'none' ? theme.colors.primary : '#999'} />
-                    <Text style={[styles.lockLabel, { marginLeft: 8 }]}>Repeat Task</Text>
-                </View>
-                <Text style={{ color: recurrence !== 'none' ? theme.colors.primary : '#999', fontWeight: '600', textTransform: 'capitalize' }}>
-                    {recurrence === 'none' ? 'Never' : recurrence}
-                </Text>
-             </TouchableOpacity>
+      {/* UPDATED MODAL: Wrapped in SafeAreaView to respect Notch/Status Bar */}
+      <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalVisible(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+            
+            {/* Header with hitSlop for easier touching */}
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setModalVisible(false)} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                <Text style={styles.modalCancel}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>{editingId ? 'Edit Note' : 'New Note'}</Text>
+              <TouchableOpacity onPress={saveNote} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                <Text style={styles.modalSave}>Done</Text>
+              </TouchableOpacity>
+            </View>
 
-             <View style={styles.lockToggleRow}>
-               <View style={styles.row}>
-                 <Ionicons name={isLocked ? "lock-closed" : "lock-open-outline"} size={20} color={isLocked ? theme.colors.primary : '#999'} />
-                 <Text style={styles.lockLabel}> Password Protect</Text>
+            <ScrollView style={styles.editorContainer}>
+               <TextInput style={styles.editorTitle} placeholder="Title" value={title} onChangeText={setTitle} placeholderTextColor="#999"/>
+               
+               <TouchableOpacity onPress={toggleRecurrence} style={styles.recurrenceSelector}>
+                 <View style={styles.row}>
+                     <MaterialCommunityIcons name="calendar-refresh" size={20} color={recurrence !== 'none' ? theme.colors.primary : '#999'} />
+                     <Text style={[styles.lockLabel, { marginLeft: 8 }]}>Repeat Task</Text>
+                 </View>
+                 <Text style={{ color: recurrence !== 'none' ? theme.colors.primary : '#999', fontWeight: '600', textTransform: 'capitalize' }}>
+                     {recurrence === 'none' ? 'Never' : recurrence}
+                 </Text>
+               </TouchableOpacity>
+
+               <View style={styles.lockToggleRow}>
+                 <View style={styles.row}>
+                   <Ionicons name={isLocked ? "lock-closed" : "lock-open-outline"} size={20} color={isLocked ? theme.colors.primary : '#999'} />
+                   <Text style={styles.lockLabel}> Password Protect</Text>
+                 </View>
+                 <Switch value={isLocked} onValueChange={setIsLocked} trackColor={{true: theme.colors.primary}} />
                </View>
-               <Switch value={isLocked} onValueChange={setIsLocked} trackColor={{true: theme.colors.primary}} />
-             </View>
-             {isLocked && <TextInput style={styles.pinInput} placeholder="Enter 4-digit PIN" value={pin} onChangeText={t => { if(t.length <= 4) setPin(t.replace(/[^0-9]/g, '')) }} keyboardType="numeric" secureTextEntry />}
-             <TextInput ref={contentInputRef} style={styles.editorContent} placeholder="Start typing..." value={content} onChangeText={setContent} multiline textAlignVertical="top" placeholderTextColor="#ccc"/>
-             <View style={{height: 60}} />
-          </ScrollView>
-          <View style={styles.toolbar}>
-            <TouchableOpacity onPress={() => insertText('\n• ')} style={styles.toolBtn}><MaterialCommunityIcons name="format-list-bulleted" size={24} color="#333" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => insertText('\n☐ ')} style={styles.toolBtn}><MaterialCommunityIcons name="checkbox-blank-outline" size={24} color="#333" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => insertText(`\n___\n`)} style={styles.toolBtn}><MaterialCommunityIcons name="minus" size={24} color="#333" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => Keyboard.dismiss()} style={[styles.toolBtn, { marginLeft: 'auto' }]}><Ionicons name="chevron-down" size={24} color="#333" /></TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
+               {isLocked && <TextInput style={styles.pinInput} placeholder="Enter 4-digit PIN" value={pin} onChangeText={t => { if(t.length <= 4) setPin(t.replace(/[^0-9]/g, '')) }} keyboardType="numeric" secureTextEntry />}
+               <TextInput ref={contentInputRef} style={styles.editorContent} placeholder="Start typing..." value={content} onChangeText={setContent} multiline textAlignVertical="top" placeholderTextColor="#ccc"/>
+               <View style={{height: 60}} />
+            </ScrollView>
+
+            <View style={styles.toolbar}>
+              <TouchableOpacity onPress={() => insertText('\n• ')} style={styles.toolBtn}><MaterialCommunityIcons name="format-list-bulleted" size={24} color="#333" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => insertText('\n☐ ')} style={styles.toolBtn}><MaterialCommunityIcons name="checkbox-blank-outline" size={24} color="#333" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => insertText(`\n___\n`)} style={styles.toolBtn}><MaterialCommunityIcons name="minus" size={24} color="#333" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => Keyboard.dismiss()} style={[styles.toolBtn, { marginLeft: 'auto' }]}><Ionicons name="chevron-down" size={24} color="#333" /></TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </Modal>
 
       <Modal visible={authVisible} transparent animationType="fade">
@@ -740,7 +751,7 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes, activeRecording, activeTimer, onS
 };
 
 // ==========================================
-// 7. SWIPEABLE ITEM (ALIGNED WITH PLANNER LOGIC)
+// 7. SWIPEABLE ITEM
 // ==========================================
 
 const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { children: React.ReactNode, onSwipeRight: () => void, onSwipeLeft: () => void, onPress?: () => void }) => {
@@ -774,12 +785,12 @@ const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { child
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.swipeBackLayer}>
-         <Animated.View style={[styles.swipeLeftAction, { opacity: pan.x.interpolate({ inputRange: [0, SWIPE_THRESHOLD], outputRange: [0, 1] }) }]}>
-            <Ionicons name="trash" size={24} color="#fff" /><Text style={{color:'#fff', fontWeight:'bold', marginLeft: 8}}>DELETE</Text>
-         </Animated.View>
-         <Animated.View style={[styles.swipeRightAction, { opacity: pan.x.interpolate({ inputRange: [-SWIPE_THRESHOLD, 0], outputRange: [1, 0] }) }]}>
-            <Text style={{color:'#fff', fontWeight:'bold', marginRight: 8}}>EDIT</Text><MaterialIcons name="edit" size={24} color="#fff" />
-         </Animated.View>
+          <Animated.View style={[styles.swipeLeftAction, { opacity: pan.x.interpolate({ inputRange: [0, SWIPE_THRESHOLD], outputRange: [0, 1] }) }]}>
+             <Ionicons name="trash" size={24} color="#fff" /><Text style={{color:'#fff', fontWeight:'bold', marginLeft: 8}}>DELETE</Text>
+          </Animated.View>
+          <Animated.View style={[styles.swipeRightAction, { opacity: pan.x.interpolate({ inputRange: [-SWIPE_THRESHOLD, 0], outputRange: [1, 0] }) }]}>
+             <Text style={{color:'#fff', fontWeight:'bold', marginRight: 8}}>EDIT</Text><MaterialIcons name="edit" size={24} color="#fff" />
+          </Animated.View>
       </View>
       <Animated.View style={[{ transform: [{ translateX: pan.x }] }]} {...panResponder.panHandlers}>
         <TouchableOpacity activeOpacity={0.9} onPress={onPress}>{children}</TouchableOpacity>
